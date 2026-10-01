@@ -10,7 +10,11 @@ Cần Python 3 và có mạng ở lần đầu (Three.js tải từ CDN).
 https://mrgiangleai.github.io/3D-terrarium/ — chạy được toàn bộ bể, nhưng không có máy chủ quản lý nên **Quản lý mô hình** (xóa file, tải thêm) chỉ dùng được khi chạy bằng `Mở Bể Cá.command`. Dữ liệu bể lưu trong trình duyệt của từng người.
 
 ## Tính năng
-- Bể trống, tự setup từ Thư viện: đèn (LED, rọi, ánh trăng), nền, đá, lũa, cây, trang trí, cá, rùa, cua.
+- **Kiểu bể** (tab Bể): bể cá chữ nhật, hộp terrarium có nắp và đế gỗ, bể kính cắt góc kiểu kim cương; chỉnh rộng/cao/sâu/cắt góc, đế (gỗ sáng, nâu đỏ, đá), khung (silicone hay kim loại mảnh), nắp kính.
+- **Nền tường trong bể**: tường rêu 3D, đá phiến, vỏ bần, đen; tường phòng bê tông.
+- **Bể mẫu bày sẵn như ảnh tham khảo** và cảnh khởi đầu mặc định; góc nhìn toàn cảnh, cuộn chuột để zoom theo con trỏ, Shift + kéo để dịch, bấm đúp để về lại.
+- Đèn: LED, rọi, ánh trăng, **đèn cổ ngỗng**, **LED màu phía sau**; chỉnh độ cao, màu, độ sáng.
+- Tự setup từ Thư viện: nền, đá, lũa, cây, trang trí, cá, rùa, cua.
 - Vật lý thật (Rapier): xếp chồng, xoay 3 chiều, đổi cỡ.
 - Cọ tô rêu lên bề mặt vật; cọ chỉnh địa hình (nâng/hạ/gồ ghề/làm phẳng).
 - Mực nước chỉnh tới 3% để làm bể bán cạn; mặt nước phản chiếu, độ trong chỉnh được.

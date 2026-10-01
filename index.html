@@ -151,24 +151,27 @@ vFogDepth=-mvPosition.z;vFWorld=(inverse(viewMatrix)*mvPosition).xyz;
 THREE.ShaderChunk.fog_pars_fragment=`#ifdef USE_FOG
 uniform vec3 fogColor;varying float vFogDepth;varying vec3 vFWorld;uniform float fogNear;uniform float fogFar;
 #endif`;
+// Nước chỉ nằm trong hộp bể: fogNear = mực nước + 1000*(nửa sâu), fogFar = độ hấp thụ + 1000*(nửa rộng)
 THREE.ShaderChunk.fog_fragment=`#ifdef USE_FOG
-{vec3 C=cameraPosition;vec3 P=vFWorld;float cy=C.y-fogNear,py=P.y-fogNear;float len=distance(C,P);float inside;
- if(cy<=0.&&py<=0.)inside=len;else if(cy>0.&&py>0.)inside=0.;
- else{float tc=cy/(cy-py);inside=(cy<=0.)?tc*len:(1.-tc)*len;}
- if(cy<=0.)inside=max(0.,inside-max(0.,C.z-28.));
- float fogFactor=1.-exp(-inside/fogFar);
+{float wl=mod(fogNear,1000.),hd=floor(fogNear/1000.),Lab=mod(fogFar,1000.),hw=floor(fogFar/1000.);
+ vec3 C=cameraPosition;vec3 d=vFWorld-C;float len=length(d);d+=vec3(1e-5);
+ vec3 bmin=vec3(-hw,-1000.,-hd),bmax=vec3(hw,wl,hd),iv=1./d,ta=(bmin-C)*iv,tb=(bmax-C)*iv,tmin=min(ta,tb),tmax=max(ta,tb);
+ float t0=max(max(tmin.x,tmin.y),max(tmin.z,0.)),t1=min(min(tmax.x,tmax.y),min(tmax.z,1.));
+ float inside=max(0.,t1-t0)*len;
+ float fogFactor=1.-exp(-inside/Lab);
  gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,clamp(fogFactor,0.,1.));}
 #endif`;
 {const k='directLight.color = inSpotLightMap ? directLight.color * spotColor.rgb : directLight.color;';
  if(!THREE.ShaderChunk.lights_fragment_begin.includes(k))console.warn('caustic chunk not patched');
  THREE.ShaderChunk.lights_fragment_begin=THREE.ShaderChunk.lights_fragment_begin.replace(k,
  `#ifdef USE_FOG
- {float cWY=cameraPosition.y+dot(mat3(viewMatrix)[1],geometryPosition);float cMask=smoothstep(fogNear+1.,fogNear-1.5,cWY);
+ {float wl=mod(fogNear,1000.),hd=floor(fogNear/1000.),hw=floor(fogFar/1000.);vec3 wp=cameraPosition+transpose(mat3(viewMatrix))*geometryPosition;
+ float cMask=(abs(wp.x)<hw&&abs(wp.z)<hd)?smoothstep(wl+1.,wl-1.5,wp.y):0.;
  directLight.color = inSpotLightMap ? directLight.color * mix(vec3(1.0),spotColor.rgb,cMask) : directLight.color;}
  #else
  directLight.color = inSpotLightMap ? directLight.color * spotColor.rgb : directLight.color;
  #endif`);}
-const TW=120, TH=62, TD=56;           // kích thước bể (đơn vị ~ cm)
+let TW=120,TH=62,TD=56,CUT=0,BASEH=0;   // kích thước bể (đơn vị ~ cm), đổi theo kiểu bể
 const $=s=>document.querySelector(s);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const lerp=(a,b,t)=>a+(b-a)*t;
@@ -185,17 +188,33 @@ function noise3(x,y,z,s=0){
 function fbm3(x,y,z,o=4,s=0){let a=.5,t=0,n=0;for(let i=0;i<o;i++){t+=a*noise3(x,y,z,s+i*7);n+=a;x*=2.03;y*=2.03;z*=2.03;a*=.5;}return t/n;}
 function rng(seed){let s=(Math.imul(seed|0,2654435761)^0x9e3779b9)|0||1;return()=>{s^=s<<13;s^=s>>>17;s^=s<<5;return(s>>>0)/4294967296;};}
 
+// ---------------- kiểu bể ----------------
+const TANK_PRESETS={
+  aquarium:{name:'Bể cá chữ nhật',w:120,h:62,d:56,cut:0,base:'none',lid:false,frame:'sili',inner:'none',sides:false,view:'fill'},
+  box:{name:'Hộp terrarium có nắp',w:72,h:38,d:38,cut:0,base:'wood',lid:true,frame:'metal',inner:'moss',sides:true,view:'show'},
+  gem:{name:'Bể kính cắt góc',w:46,h:68,d:36,cut:10,base:'mahogany',lid:true,frame:'metal',inner:'moss',sides:true,view:'show'}};
+const BASE_H={none:0,wood:4,mahogany:9,stone:3};
+function applyTankDims(){
+  const T=S.tank;TW=clamp(+T.w||72,30,160);TH=clamp(+T.h||38,20,100);TD=clamp(+T.d||38,20,90);
+  CUT=clamp(+T.cut||0,0,Math.min(TW,TD)/2-8);BASEH=BASE_H[T.base]??0;
+}
 // ---------------- state ----------------
-const DEF={substrate:{type:'none',slope:.5,hill:0,hillX:0,rough:0,hm:null},
+const DEF={tank:{preset:'box',...TANK_PRESETS.box},substrate:{type:'none',slope:.5,hill:0,hillX:0,rough:0,hm:null},
   water:{color:'#1f5a55',clarity:.55,ambient:.35,motes:350,bubbles:false,back:'room',room:.3,wall:'#8b9299',level:.9,clearTop:.35},
   lights:[],objects:[],fish:{},critters:{},quality:'mid',uid:1};
 let S=structuredClone(DEF);
 try{const s=JSON.parse(localStorage.getItem('aq3d')||'null');
   if(s)S={...S,...s,substrate:{...DEF.substrate,...s.substrate},water:{...DEF.water,...s.water},fish:{...(s.fish||{})},critters:{...(s.critters||{})}};
-  if(!['room','black','blue','teal'].includes(S.water.back))S.water.back='room';
+  if(s&&!s.tank)S.tank={preset:'aquarium',...TANK_PRESETS.aquarium};else if(s)S.tank={...DEF.tank,...s.tank};
+  if(!['room','black','blue','teal','concrete'].includes(S.water.back))S.water.back='room';
   if(Array.isArray(S.substrate.hm)&&S.substrate.hm.length===121*57)S.substrate.hm=Float32Array.from(S.substrate.hm);else S.substrate.hm=null;}catch(e){}
+applyTankDims();
 const WL=()=>TH*clamp(S.water.level??.9,.03,1);
 const WLu={value:TH*.9};
+const tankOctOK=(x,z,m=0)=>{if(CUT<=0)return true;return Math.abs(x)+Math.abs(z)<=TW/2+TD/2-CUT-m*1.4142;};
+function clampTankXZ(o,m=0){o.x=clamp(o.x,-TW/2+m,TW/2-m);o.z=clamp(o.z,-TD/2+m,TD/2-m);
+  if(CUT>0){const e=Math.abs(o.x)+Math.abs(o.z)-(TW/2+TD/2-CUT-m*1.4142);if(e>0){o.x-=Math.sign(o.x)*e/2;o.z-=Math.sign(o.z)*e/2;}}return o;}
+const FIRSTRUN=!localStorage.getItem('aq3d');
 let saveT=0;
 function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem('aq3d',JSON.stringify(S,(k,v)=>v instanceof Float32Array?Array.from(v,x=>Math.round(x*10)/10):v));}catch(e){}},300);}
 
@@ -229,29 +248,115 @@ const wallTex=(()=>{const W2=256,H2=256,c=document.createElement('canvas');c.wid
   g.putImageData(id,0,0);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;})();
 const roomMats={below:new THREE.MeshBasicMaterial({map:wallTex,fog:true,side:THREE.DoubleSide}),
                 above:new THREE.MeshBasicMaterial({map:wallTex,fog:true,side:THREE.DoubleSide})};
+let _cw=null;const getConcreteWall=()=>_cw||(_cw=(()=>{const t=kindTex('concrete').map.clone();t.needsUpdate=true;t.repeat.set(7,1.6);return t;})());
 const room={};
 for(const k of ['back','left','right']){room[k]={};for(const p of ['below','above']){const m=new THREE.Mesh(new THREE.PlaneGeometry(1,1),roomMats[p]);scene.add(m);room[k][p]=m;}}
+// ---- vật liệu chung ----
 const glassMat=new THREE.MeshStandardMaterial({color:0xcfeee8,transparent:true,opacity:.06,roughness:.02,metalness:0,depthWrite:false,side:THREE.DoubleSide});
-const glassBack=new THREE.Mesh(new THREE.PlaneGeometry(TW,TH),glassMat);glassBack.position.set(0,TH/2,-TD/2);scene.add(glassBack);
-const glassSide=[-1,1].map(sx=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(TD,TH),glassMat);m.rotation.y=Math.PI/2;m.position.set(sx*TW/2,TH/2,0);scene.add(m);return m;});
+const lidMat=new THREE.MeshStandardMaterial({color:0xcfeee8,transparent:true,opacity:.12,roughness:.02,metalness:0,depthWrite:false,side:THREE.DoubleSide});
 const siliMat=new THREE.MeshStandardMaterial({color:0x0c0e0e,roughness:.42,metalness:.05});
-const addBox=(w,h,d,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),siliMat);m.position.set(x,y,z);m.castShadow=false;m.receiveShadow=true;scene.add(m);return m;};
-for(const sx of [-1,1]){addBox(1.4,TH,1.4,sx*TW/2,TH/2,-TD/2);addBox(1.4,1.4,TD,sx*TW/2,.7,0);addBox(2.2,4,TD,sx*TW/2,TH-2,0);}
-addBox(TW+2,1.4,1.4,0,.7,-TD/2);addBox(TW+2,4,2.2,0,TH-2,-TD/2);
+const metalMat=new THREE.MeshStandardMaterial({color:0x121415,roughness:.36,metalness:.6,envMap:envTex,envMapIntensity:.55});
+const brassMat=new THREE.MeshStandardMaterial({color:0xb8913a,roughness:.3,metalness:.92,envMap:envTex,envMapIntensity:1});
 const meniMat=new THREE.MeshBasicMaterial({color:0xcff8ee,transparent:true,opacity:.55,blending:THREE.AdditiveBlending,depthWrite:false,fog:false});
-const meniBack=new THREE.Mesh(new THREE.PlaneGeometry(TW,.7),meniMat);meniBack.position.z=-TD/2+.06;scene.add(meniBack);
-const meniSide=[-1,1].map(sx=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(TD,.7),meniMat);m.rotation.y=Math.PI/2;m.position.x=sx*TW/2-(sx*.06);scene.add(m);return m;});
+
+// ---- texture thủ tục lặp liền mạch (đế gỗ, đá, bê tông, vỏ bần…) ----
+function pn(x,y,P){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+  const h=(a,b)=>hash3(((a%P)+P)%P,((b%P)+P)%P,0,7);
+  return lerp(lerp(h(ix,iy),h(ix+1,iy),u),lerp(h(ix,iy+1),h(ix+1,iy+1),u),v);}
+function pfbm(x,y,P,o){let a=.5,t=0,n=0;for(let i=0;i<o;i++){t+=a*pn(x,y,P);n+=a;x*=2;y*=2;P*=2;a*=.5;}return t/n;}
+const KTEX={};
+function kindTex(kind,N=512){
+  if(KTEX[kind])return KTEX[kind];
+  const cc=document.createElement('canvas'),bc=document.createElement('canvas');cc.width=cc.height=bc.width=bc.height=N;
+  const cg=cc.getContext('2d'),bg=bc.getContext('2d'),ci=cg.createImageData(N,N),bi=bg.createImageData(N,N);
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const u=x/N,v=y/N;let r,g,b,h;
+    if(kind==='wood'||kind==='mahogany'){
+      const warp=pfbm(u*4,v*10,4,3)*4,st=Math.sin((v*18+warp)*6.2832)*.5+.5,fine=pfbm(u*32,v*128,32,3),dark=Math.pow(st,1.6)*.75+fine*.35;
+      if(kind==='wood'){r=lerp(.62,.17,dark);g=lerp(.44,.1,dark);b=lerp(.24,.05,dark);}
+      else{r=lerp(.46,.2,dark);g=lerp(.16,.055,dark);b=lerp(.1,.035,dark);}
+      h=.55-dark*.35+fine*.15;
+    }else if(kind==='concrete'){
+      const c=pfbm(u*6,v*6,6,5),sp=pn(u*160,v*160,160),pit=pn(u*40,v*40,40)>.9?.78:1;
+      const k=(.3+.5*c)*(.82+.3*sp)*pit;r=k;g=k*1.01;b=k*1.04;h=.5*c+.3*sp;
+    }else if(kind==='stone'){
+      const c=pfbm(u*5,v*5,5,5),vein=1-Math.abs(pfbm(u*8,v*8,8,3)*2-1),k=.28+.4*c+.12*Math.pow(vein,6);
+      r=k*1.02;g=k;b=k*.96;h=.5*c;
+    }else if(kind==='slate'){
+      const rid=1-Math.abs(pfbm(u*7,v*7,7,4)*2-1),pl=pfbm(u*22,v*22,22,3),k=.12+.25*Math.pow(rid,2)+.1*pl;
+      r=k*.98;g=k;b=k*1.05;h=.4*rid+.3*pl;
+    }else{ // cork
+      const w=pfbm(u*4,v*14,4,4),crack=1-Math.abs(pfbm(u*10,v*30,10,3)*2-1),k=.42+.4*w-.28*Math.pow(crack,5)+(pn(u*120,v*120,120)-.5)*.18;
+      r=k*.95;g=k*.66;b=k*.4;h=.45*w-.25*Math.pow(crack,5);
+    }
+    const i=(y*N+x)*4;ci.data[i]=clamp(r,0,1)*255;ci.data[i+1]=clamp(g,0,1)*255;ci.data[i+2]=clamp(b,0,1)*255;ci.data[i+3]=255;
+    const hh=clamp(h,0,1)*255;bi.data[i]=bi.data[i+1]=bi.data[i+2]=hh;bi.data[i+3]=255;
+  }
+  cg.putImageData(ci,0,0);bg.putImageData(bi,0,0);
+  const map=new THREE.CanvasTexture(cc),bump=new THREE.CanvasTexture(bc);map.colorSpace=THREE.SRGBColorSpace;
+  for(const t of [map,bump]){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.anisotropy=8;}
+  return KTEX[kind]={map,bump,url:cc.toDataURL('image/jpeg',.7)};
+}
+function texMat(kind,repX,repY,o={}){
+  const t=kindTex(kind),map=t.map.clone(),bump=t.bump.clone();for(const x of [map,bump]){x.needsUpdate=true;x.repeat.set(repX,repY);}
+  return new THREE.MeshStandardMaterial({map,bumpMap:bump,bumpScale:o.bump??2,roughness:o.rough??.7,metalness:o.metal??0,side:o.side||THREE.FrontSide});
+}
+
+// ---- hình chiếu đáy bể (chữ nhật hoặc bát giác cắt góc) ----
+function footprint(inset=0){
+  const hw=TW/2-inset,hd=TD/2-inset,c=Math.max(0,CUT-inset*.4142);
+  if(c<=0)return [[-hw,-hd],[hw,-hd],[hw,hd],[-hw,hd]];
+  return [[-hw+c,-hd],[hw-c,-hd],[hw,-hd+c],[hw,hd-c],[hw-c,hd],[-hw+c,hd],[-hw,hd-c],[-hw,-hd+c]];
+}
+function footprintGeo(inset=0){const sh=new THREE.Shape(footprint(inset).map(p=>new THREE.Vector2(p[0],-p[1])));return new THREE.ShapeGeometry(sh).rotateX(-Math.PI/2);}
+const shellG=new THREE.Group();scene.add(shellG);
+let meniList=[];
+const glassBottom=new THREE.Mesh(footprintGeo(),new THREE.MeshStandardMaterial({color:0x0d1416,roughness:.18,metalness:.2}));
+glassBottom.receiveShadow=true;scene.add(glassBottom);
+function disposeGroup(g){g.traverse(o=>{if(o.geometry&&!o.userData.keepGeo)o.geometry.dispose();});while(g.children.length)g.remove(g.children[0]);}
+function buildTankShell(){
+  disposeGroup(shellG);meniList=[];
+  const T=S.tank,pts=footprint(0),n=pts.length,metal=T.frame==='metal',ft=metal?.55:1.4,fm=metal?metalMat:siliMat;
+  const add=(m,shadow=false)=>{m.castShadow=false;m.receiveShadow=true;shellG.add(m);return m;};
+  for(let i=0;i<n;i++){
+    const a=pts[i],b=pts[(i+1)%n],dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz),ry=Math.atan2(-dz,dx),mx=(a[0]+b[0])/2,mz=(a[1]+b[1])/2;
+    const glass=new THREE.Mesh(new THREE.PlaneGeometry(len,TH),glassMat);glass.position.set(mx,TH/2,mz);glass.rotation.y=ry;glass.renderOrder=4;shellG.add(glass);
+    // thanh khung đáy + miệng
+    const bar=(h,y,thick)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(len+ft,h,thick),fm);m.position.set(mx,y,mz);m.rotation.y=ry;add(m);};
+    bar(ft,ft/2,ft);
+    if(metal||T.lid)bar(ft,TH-ft/2,ft);else bar(4,TH-2,2.2);
+    // trụ đứng tại đỉnh a
+    const post=new THREE.Mesh(new THREE.BoxGeometry(ft,TH,ft),fm);post.position.set(a[0],TH/2,a[1]);add(post);
+    // đường mép nước trên kính
+    const m=Math.hypot(mx,mz)||1,mn=new THREE.Mesh(new THREE.PlaneGeometry(len,.7),meniMat);mn.position.set(mx-mx/m*.06,0,mz-mz/m*.06);mn.rotation.y=ry;shellG.add(mn);meniList.push(mn);
+  }
+  // nắp kính + núm đồng
+  if(T.lid){
+    const lid=new THREE.Mesh(footprintGeo(),lidMat);lid.position.y=TH;lid.renderOrder=4;shellG.add(lid);
+    const stem=new THREE.Mesh(new THREE.CylinderGeometry(.35,.4,1.6,16),brassMat),knob=new THREE.Mesh(new THREE.SphereGeometry(1.05,24,16),brassMat);
+    stem.position.set(0,TH+.8,0);knob.position.set(0,TH+2.1,0);knob.castShadow=true;shellG.add(stem);shellG.add(knob);
+  }
+  // đế
+  if(BASEH>0){
+    const sh=new THREE.Shape(footprint(-3.6).map(p=>new THREE.Vector2(p[0],-p[1])));
+    const g=new THREE.ExtrudeGeometry(sh,{depth:BASEH-.4,bevelEnabled:true,bevelSize:.4,bevelThickness:.4,bevelSegments:2}).rotateX(-Math.PI/2).translate(0,-BASEH,0);
+    const kind=T.base==='stone'?'stone':T.base==='mahogany'?'mahogany':'wood',bm=texMat(kind,1/38,1/38,{bump:1.5,rough:.45});
+    const base=new THREE.Mesh(g,bm);base.castShadow=base.receiveShadow=true;shellG.add(base);
+  }
+  // sàn (bê tông) để nhìn thấy khi xem toàn cảnh
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(700,700).rotateX(-Math.PI/2),texMat('concrete',700/90,700/90,{bump:2.5,rough:.92}));
+  floor.position.y=-BASEH-.05;floor.receiveShadow=true;shellG.add(floor);
+  buildInnerWalls();
+  layoutShell();
+}
 function layoutShell(){
   const wl=WL(),lo=-80,hi=TH+120;
   const seg=(m,y0,y1,w,x,z,ry)=>{m.scale.set(w,Math.max(.01,y1-y0),1);m.position.set(x,(y0+y1)/2,z);m.rotation.y=ry;};
-  seg(room.back.below,lo,wl,600,0,-TD/2-14,0);seg(room.back.above,wl,hi,600,0,-TD/2-14,0);
-  seg(room.left.below,lo,wl,320,-TW/2-80,-50,Math.PI/2);seg(room.left.above,wl,hi,320,-TW/2-80,-50,Math.PI/2);
-  seg(room.right.below,lo,wl,320,TW/2+80,-50,-Math.PI/2);seg(room.right.above,wl,hi,320,TW/2+80,-50,-Math.PI/2);
-  meniBack.position.y=wl;for(const m of meniSide)m.position.y=wl;
+  seg(room.back.below,lo,wl,900,0,-TD/2-30,0);seg(room.back.above,wl,hi,900,0,-TD/2-30,0);
+  seg(room.left.below,lo,wl,420,-TW/2-120,-50,Math.PI/2);seg(room.left.above,wl,hi,420,-TW/2-120,-50,Math.PI/2);
+  seg(room.right.below,lo,wl,420,TW/2+120,-50,-Math.PI/2);seg(room.right.above,wl,hi,420,TW/2+120,-50,-Math.PI/2);
+  for(const m of meniList)m.position.y=wl;
 }
-const glassBottom=new THREE.Mesh(new THREE.PlaneGeometry(TW,TD).rotateX(-Math.PI/2),
-  new THREE.MeshStandardMaterial({color:0x0d1416,roughness:.18,metalness:.2}));
-glassBottom.receiveShadow=true;scene.add(glassBottom);
 
 // ---------------- substrate ----------------
 const SUBS={none:{name:'Không nền'},sand:{name:'Cát vàng'},white:{name:'Cát trắng'},gravel:{name:'Sỏi'},soil:{name:'Phân nền đen'},moss:{name:'Nền rêu xanh'}};
@@ -309,7 +414,7 @@ function subTex(type){
   map.colorSpace=THREE.SRGBColorSpace;
   const rep=type==='gravel'?22:type==='soil'?12:type==='moss'?8:9;
   for(const t of [map,bump]){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(TW/rep,TD/rep);t.anisotropy=8;}
-  return subTexCache[type]={map,bump,url:cc.toDataURL('image/jpeg',.8)};
+  return subTexCache[type]={map,bump,rep,url:cc.toDataURL('image/jpeg',.8)};
 }
 const subMat=new THREE.MeshStandardMaterial({roughness:.95,vertexColors:true,bumpScale:2.2});
 let subMesh=null,subSkirt=null,lastSub={...S.substrate};
@@ -318,8 +423,9 @@ function buildSubstrate(){
   subMesh=subSkirt=null;
   const t=S.substrate.type;glassBottom.visible=t==='none';
   if(t!=='none'){
-    const tx=subTex(t);subMat.map=tx.map;subMat.bumpMap=tx.bump;subMat.needsUpdate=true;
+    const tx=subTex(t);subMat.map=tx.map;subMat.bumpMap=tx.bump;tx.map.repeat.set(TW/tx.rep,TD/tx.rep);tx.bump.repeat.set(TW/tx.rep,TD/tx.rep);subMat.needsUpdate=true;
     const g=new THREE.PlaneGeometry(TW,TD,150,70).rotateX(-Math.PI/2),P=g.attributes.position,col=new Float32Array(P.count*3);
+    if(CUT>0)for(let i=0;i<P.count;i++){const q={x:P.getX(i),z:P.getZ(i)};clampTankXZ(q,.3);P.setX(i,q.x);P.setZ(i,q.z);}
     for(let i=0;i<P.count;i++){const x=P.getX(i),z=P.getZ(i);P.setY(i,subH(x,z));
       const v=.78+.34*fbm3(x*.04,7,z*.04,3,11);col[i*3]=v;col[i*3+1]=v*.98;col[i*3+2]=v*.95;}
     g.setAttribute('color',new THREE.BufferAttribute(col,3));g.computeVertexNormals();
@@ -329,12 +435,12 @@ function buildSubstrate(){
       if(i<n){const a=i*2;idx.push(a,a+2,a+1,a+1,a+2,a+3);}}
     const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
     sg.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));sg.setAttribute('color',new THREE.Float32BufferAttribute(cl,3));
-    sg.setIndex(idx);sg.computeVertexNormals();subSkirt=new THREE.Mesh(sg,subMat);scene.add(subSkirt);
+    sg.setIndex(idx);sg.computeVertexNormals();subSkirt=new THREE.Mesh(sg,subMat);subSkirt.visible=CUT<=0;scene.add(subSkirt);
   }
   // nền thay đổi: nâng/hạ mọi vật theo độ cao nền mới rồi để vật lý tự ổn định
   for(const o of S.objects){if(o.y==null)continue;const r=rootOf(o.uid);
     o.y+=subH(o.x,o.z)-subH(o.x,o.z,lastSub);if(r)applyTransform(o,.3);}
-  lastSub={...S.substrate};rebuildGround();
+  lastSub={...S.substrate};rebuildGround();buildFloorMoss();
   if(placing)placing.root.visible=false;
 }
 
@@ -356,7 +462,9 @@ cScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),cMat));
 const LTYPE={
   led:{name:'Dải LED',color:'#fff1dc',intensity:4,angle:58,pen:.9,caustics:true,rays:true},
   spot:{name:'Đèn rọi',color:'#fff4e0',intensity:7,angle:20,pen:.45,caustics:true,rays:true},
-  moon:{name:'Ánh trăng',color:'#7aa2ff',intensity:1.4,angle:70,pen:1,caustics:true,rays:false}};
+  moon:{name:'Ánh trăng',color:'#7aa2ff',intensity:1.4,angle:70,pen:1,caustics:true,rays:false},
+  goose:{name:'Đèn cổ ngỗng',color:'#fff1d8',intensity:9,angle:30,pen:.65,caustics:true,rays:true,h:18,arm:true},
+  accent:{name:'LED màu (nền)',color:'#4a7bff',intensity:2.4,angle:80,pen:1,caustics:false,rays:false,h:9,point:true,abs:true}};
 const SWATCH=['#fff1dc','#eef6ff','#ffd9a8','#8fb8ff','#ffb3e6','#b8ffcf'];
 const U={uTime:{value:0}};
 // tia sáng = nhiều dải mảnh tỏa từ đèn xuống, mỗi dải nhấp nháy riêng
@@ -367,8 +475,8 @@ void main(){if(vWY>uWL)discard;float across=sin(3.14159*vUv.x);across*=across;
   float down=vUv.y;float fade=(1.-down)*(1.-down)*smoothstep(0.,.06,down);
   float fl=.45+.55*(.5+.5*sin(uTime*(.35+fract(vPh*7.3)*.4)+vPh*6.28));
   gl_FragColor=vec4(uColor*across*fade*fl*uStrength*smoothstep(uWL,uWL-6.,vWY),1.);}`;
-function rayGeo(angleDeg,seed){
-  const r=rng(seed),y=TH+10,len=TH*1.05,pos=[],uv=[],ph=[],idx=[],n=14,spread=Math.tan(THREE.MathUtils.degToRad(Math.min(angleDeg,60)))*.75;
+function rayGeo(angleDeg,seed,y){
+  const r=rng(seed),len=y+BASEH*0+4,pos=[],uv=[],ph=[],idx=[],n=14,spread=Math.tan(THREE.MathUtils.degToRad(Math.min(angleDeg,60)))*.75;
   for(let i=0;i<n;i++){
     const a=r()*TAU,d=Math.sqrt(r()),ox=Math.cos(a)*d*spread*y,oz=Math.sin(a)*d*spread*y*.6;
     const x0=ox*(10/y),z0=oz*(10/y),x1=ox*((10+len)/y),z1=oz*((10+len)/y);
@@ -381,50 +489,73 @@ function rayGeo(angleDeg,seed){
   g.setAttribute('aUv',new THREE.Float32BufferAttribute(uv,2));g.setAttribute('aPhase',new THREE.Float32BufferAttribute(ph,1));g.setIndex(idx);return g;
 }
 const LO=new Map();let selLight=null;
+const lightY=L=>{const p=LTYPE[L.type];return p.abs?(L.h??p.h):TH+(L.h??p.h??10);};
+function gooseBuild(o){
+  o.arm=new THREE.Group();scene.add(o.arm);o.armMesh=null;
+  o.headMat=new THREE.MeshBasicMaterial({color:0xfff2d8,toneMapped:false,fog:false});
+  o.hood=new THREE.Mesh(new THREE.CylinderGeometry(1.8,3.5,5.2,28,1,true),new THREE.MeshStandardMaterial({color:0x0b0c0d,roughness:.4,metalness:.6,side:THREE.DoubleSide}));
+  o.disc=new THREE.Mesh(new THREE.CircleGeometry(3.2,28).rotateX(Math.PI/2),o.headMat);
+  o.base=new THREE.Mesh(new THREE.CylinderGeometry(3.2,3.6,1.4,24),new THREE.MeshStandardMaterial({color:0x101112,roughness:.5,metalness:.4}));
+  o.arm.add(o.hood);o.arm.add(o.disc);o.arm.add(o.base);
+}
+function gooseUpdate(L,o,y){
+  const bx=TW/2+12,bz=-TD/2-6,hx=L.x,hz=L.z,top=TH+Math.max(8,y-TH+5);
+  const pts=[new V3(bx,-BASEH+.7,bz),new V3(bx,TH*.5,bz),new V3(bx+.5,TH+5,bz+.5),new V3((bx+hx)/2,top+5,(bz+hz)/2),new V3(hx,top+2,hz),new V3(hx,y+3.2,hz)];
+  if(o.armMesh){o.arm.remove(o.armMesh);o.armMesh.geometry.dispose();}
+  o.armMesh=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),56,.55,8,false),new THREE.MeshStandardMaterial({color:0x0c0d0e,roughness:.45,metalness:.5}));
+  o.arm.add(o.armMesh);
+  o.hood.position.set(hx,y+.1,hz);o.disc.position.set(hx,y-2.55,hz);o.base.position.set(bx,-BASEH+.7,bz);o.headMat.color.set(L.color);
+}
 function buildLight(L){
   const p=LTYPE[L.type];
-  const spot=new THREE.SpotLight(L.color,L.intensity,0,1,p.pen,0);
-  spot.shadow.camera.near=4;spot.shadow.camera.far=TH+50;spot.shadow.bias=-.0005;spot.shadow.normalBias=.04;
+  const spot=p.point?new THREE.PointLight(L.color,L.intensity,75,0):new THREE.SpotLight(L.color,L.intensity,0,1,p.pen,0);
+  if(!p.point){spot.shadow.camera.near=4;spot.shadow.camera.far=TH+50;spot.shadow.bias=-.0005;spot.shadow.normalBias=.04;}
   const target=new THREE.Object3D();scene.add(target);spot.target=target;scene.add(spot);
   const cone=new THREE.Mesh(new THREE.BufferGeometry(),new THREE.ShaderMaterial({
     uniforms:{uColor:{value:new THREE.Color()},uStrength:{value:1},uTime:U.uTime,uWL:WLu},
     vertexShader:rayVS,fragmentShader:rayFS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide}));
   cone.renderOrder=5;scene.add(cone);
-  const handle=new THREE.Mesh(new THREE.SphereGeometry(1.3,20,14),new THREE.MeshBasicMaterial({toneMapped:false,fog:false}));
+  const handle=new THREE.Mesh(new THREE.SphereGeometry(p.point?.9:1.3,20,14),new THREE.MeshBasicMaterial({toneMapped:false,fog:false}));
   handle.userData.lightId=L.id;scene.add(handle);
-  LO.set(L.id,{spot,target,cone,handle,angle:null});syncLight(L);
+  const o={spot,target,cone,handle,angle:null,rayY:null};if(p.arm)gooseBuild(o);
+  LO.set(L.id,o);syncLight(L);
 }
 function syncLight(L){
-  const o=LO.get(L.id),q=Q[S.quality],y=TH+10,ang=THREE.MathUtils.degToRad(L.angle);
+  const o=LO.get(L.id),p=LTYPE[L.type],q=Q[S.quality],y=lightY(L),ang=THREE.MathUtils.degToRad(L.angle);
+  if(p.point){
+    o.spot.position.set(L.x,y,L.z);o.spot.color.set(L.color);o.spot.intensity=L.intensity;o.cone.visible=false;
+    o.handle.position.set(L.x,y,L.z);o.handle.material.color.set(L.color);o.handle.visible=uiOn;return;
+  }
   o.spot.position.set(L.x,y,L.z);o.target.position.set(L.x,0,L.z);o.target.updateMatrixWorld();
-  o.spot.color.set(L.color);o.spot.intensity=L.intensity;o.spot.angle=ang;
+  o.spot.color.set(L.color);o.spot.intensity=L.intensity;o.spot.angle=ang;o.spot.shadow.camera.far=y+24;o.spot.shadow.camera.updateProjectionMatrix();
   o.spot.castShadow=q.shadow>0;
   if(q.shadow){if(o.spot.shadow.map&&o.spot.shadow.map.width!==q.shadow){o.spot.shadow.map.dispose();o.spot.shadow.map=null;}
     o.spot.shadow.mapSize.set(q.shadow,q.shadow);}
   o.spot.map=(L.caustics&&q.shadow)?causticRT.texture:null;
-  if(o.angle!==L.angle){o.angle=L.angle;o.cone.geometry.dispose();o.cone.geometry=rayGeo(L.angle,L.id*31+7);}
+  if(o.angle!==L.angle||o.rayY!==y){o.angle=L.angle;o.rayY=y;o.cone.geometry.dispose();o.cone.geometry=rayGeo(L.angle,L.id*31+7,y);}
   const u=o.cone.material.uniforms;u.uColor.value.set(L.color);
-  u.uStrength.value=L.intensity*.022*(L.type==='spot'?1.5:1);
+  u.uStrength.value=L.intensity*.022*(L.type==='spot'||L.type==='goose'?1.5:1);
   o.cone.position.set(L.x,y,L.z);o.cone.visible=L.rays;
-  o.handle.position.set(L.x,TH-2.2,L.z);o.handle.material.color.set(L.color);
-  o.handle.visible=uiOn;
+  if(p.arm){gooseUpdate(L,o,y);o.handle.position.set(L.x,y-1.2,L.z);}else o.handle.position.set(L.x,TH-2.2,L.z);
+  o.handle.material.color.set(L.color);o.handle.visible=uiOn;
 }
 function addLight(type){
-  if(S.lights.length>=4){toast('Tối đa 4 đèn',1800);return;}
+  if(S.lights.length>=6){toast('Tối đa 6 đèn',1800);return;}
   const p=LTYPE[type],n=S.lights.length;
-  const L={id:S.uid++,type,x:n?clamp((Math.random()-.5)*TW*.7,-50,50):0,z:-6,color:p.color,intensity:p.intensity,angle:p.angle,caustics:p.caustics,rays:p.rays};
-  S.lights.push(L);buildLight(L);selLight=L.id;refreshAll();save();
+  const x=type==='accent'?(Math.random()<.5?-1:1)*(TW/2-7):type==='goose'?-TW*.08:(n?(Math.random()-.5)*TW*.6:0),z=type==='accent'?-TD/2+6:type==='goose'?-2:-6;
+  const L={id:S.uid++,type,x,z,h:p.h??10,color:p.color,intensity:p.intensity,angle:p.angle,caustics:p.caustics,rays:p.rays};
+  clampTankXZ(L,3);S.lights.push(L);buildLight(L);selLight=L.id;camTargets();refreshAll();save();
 }
 function removeLight(id){
   const o=LO.get(id);if(!o)return;
-  for(const m of [o.spot,o.target,o.cone,o.handle])scene.remove(m);
-  o.cone.geometry.dispose();o.spot.dispose();LO.delete(id);
-  S.lights=S.lights.filter(l=>l.id!==id);if(selLight===id)selLight=null;refreshAll();save();
+  for(const m of [o.spot,o.target,o.cone,o.handle,o.arm])if(m)scene.remove(m);
+  o.cone.geometry.dispose();if(o.spot.dispose)o.spot.dispose();if(o.arm)disposeGroup(o.arm);LO.delete(id);
+  S.lights=S.lights.filter(l=>l.id!==id);if(selLight===id)selLight=null;camTargets();refreshAll();save();
 }
 
 // ---------------- water, particles, bubbles, surface ----------------
 function lightLevel(){let s=S.water.ambient*.9;for(const L of S.lights)s+=L.intensity/7*.7;return s;}
-const surface=new THREE.Mesh(new THREE.PlaneGeometry(TW,TD).rotateX(Math.PI/2),new THREE.ShaderMaterial({
+const surface=new THREE.Mesh(footprintGeo().rotateX(Math.PI),new THREE.ShaderMaterial({
   uniforms:{uTime:U.uTime,uColor:{value:new THREE.Color()},uStrength:{value:1}},
   vertexShader:`varying vec3 vW;void main(){vec4 w=modelMatrix*vec4(position,1.);vW=w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}`,
   fragmentShader:`uniform float uTime,uStrength;uniform vec3 uColor;varying vec3 vW;
@@ -460,7 +591,7 @@ function makeMirror(){
         gl_FragColor=vec4(rgb,a);}`;
   for(const up of [false,true]){
     const shader={name:up?'WaterTop':'WaterUnder',uniforms:UniformsClone(HEAD),vertexShader:VS,fragmentShader:up?FS_UP:FS_DOWN};
-    const m=new Reflector(new THREE.PlaneGeometry(TW,TD),{textureWidth:q.mirror[0],textureHeight:q.mirror[1],clipBias:.003,shader,multisample:q.mirror[2]});
+    const m=new Reflector(footprintGeo().rotateX(Math.PI/2).rotateY(0),{textureWidth:q.mirror[0],textureHeight:q.mirror[1],clipBias:.003,shader,multisample:q.mirror[2]});
     m.material.transparent=true;m.material.depthWrite=false;m.renderOrder=2;m.userData.up=up;
     m.rotation.x=up?-Math.PI/2:Math.PI/2;m.position.y=WL();scene.add(m);mirrors.push(m);
   }
@@ -468,7 +599,8 @@ function makeMirror(){
 function UniformsClone(u){const o={};for(const k in u){const v=u[k].value;o[k]=(k==='uTime')?u[k]:{value:v&&v.clone?v.clone():v};}return o;}
 
 const MOTES=1500,mg=new THREE.BufferGeometry(),mp=new Float32Array(MOTES*3),ms=new Float32Array(MOTES);
-for(let i=0;i<MOTES;i++){mp[i*3]=(Math.random()-.5)*TW;mp[i*3+1]=Math.random()*TH;mp[i*3+2]=(Math.random()-.5)*TD;ms[i]=Math.random();}
+function fillMotes(){for(let i=0;i<MOTES;i++){mp[i*3]=(Math.random()-.5)*(TW-4);mp[i*3+1]=Math.random()*TH;mp[i*3+2]=(Math.random()-.5)*(TD-4);ms[i]=Math.random();}if(mg.attributes.position)mg.attributes.position.needsUpdate=true;}
+fillMotes();
 mg.setAttribute('position',new THREE.BufferAttribute(mp,3));mg.setAttribute('aSeed',new THREE.BufferAttribute(ms,1));
 const moteMat=new THREE.ShaderMaterial({uniforms:{uTime:U.uTime,uScale:{value:200},uTH:WLu,uLight:{value:1}},
   vertexShader:`attribute float aSeed;uniform float uTime,uScale,uTH;varying float vA;
@@ -507,9 +639,11 @@ function applyWater(){
   const w=S.water,lv=lightLevel(),wc=new THREE.Color(w.color);
   const fogc=wc.clone().multiplyScalar(.35+1.1*Math.min(1.2,lv));
   scene.fog.color.copy(fogc);
-  scene.fog.near=WL();scene.fog.far=lerp(70,330,Math.pow(w.clarity,1.3));
-  const rl=w.room??.3,wallBase=new THREE.Color(w.back==='room'?w.wall:w.back==='black'?'#050607':w.back==='blue'?'#0d3550':'#3d8d92');
+  scene.fog.near=WL()+1000*Math.round(TD/2);scene.fog.far=lerp(70,330,Math.pow(w.clarity,1.3))+1000*Math.round(TW/2);
+  const rl=w.room??.3,wallBase=new THREE.Color(w.back==='concrete'?'#8a8d91':w.back==='room'?w.wall:w.back==='black'?'#050607':w.back==='blue'?'#0d3550':'#3d8d92');
   const wc2=wallBase.clone().multiplyScalar(.05+rl*1.5);
+  {const wantMap=w.back==='concrete'?getConcreteWall():wallTex;
+   if(roomMats.below.map!==wantMap){roomMats.below.map=roomMats.above.map=wantMap;roomMats.below.needsUpdate=roomMats.above.needsUpdate=true;}}
   roomMats.above.color.copy(wc2);roomMats.below.color.copy(wc2);
   scene.background=wc2.clone().multiplyScalar(.55);
   hemi.intensity=w.ambient*1.1+rl*.3;hemi.color.copy(wc).lerp(new THREE.Color(1,1,1),.55);
@@ -745,16 +879,23 @@ function makeRoot(id,seed){
 const HMAX=3,VFALL=8,VUP=2.5,WMAX=.7,DRAGSPD=20;
 let world=null,fixedBody=null,groundCol=null,physAcc=0,wasMoving=false;
 const bodies=new Map(),hullCache={};
+let tankCols=[];
+function buildTankColliders(){
+  for(const c of tankCols)world.removeCollider(c,true);tankCols=[];
+  const C=RAPIER.ColliderDesc,add=d=>tankCols.push(world.createCollider(d,fixedBody));
+  add(C.cuboid(TW/2+4,3,TD/2+4).setTranslation(0,-3,0).setFriction(.95));
+  for(const sx of [-1,1]){add(C.cuboid(3,TH*2,TD/2+4).setTranslation(sx*(TW/2+3),TH,0));add(C.cuboid(TW/2+4,TH*2,3).setTranslation(0,TH,sx*(TD/2+3)));}
+  if(CUT>0){const Lc=TW/2+TD/2-CUT;
+    for(const sx of [-1,1])for(const sz of [-1,1]){
+      const nx=sx/1.4142,nz=sz/1.4142,cx=nx*(Lc/1.4142)+nx*1.5,cz=nz*(Lc/1.4142)+nz*1.5,th=Math.atan2(-sx,-sz);
+      add(C.cuboid(CUT*.8+4,TH*2,1.5).setTranslation(cx,TH,cz).setRotation({x:0,y:Math.sin(th/2),z:0,w:Math.cos(th/2)}));}}
+}
 async function initPhysics(){
   await RAPIER.init();
   world=new RAPIER.World({x:0,y:-26,z:0});
   const ip=world.integrationParameters;ip.lengthUnit=10;ip.contact_natural_frequency=3;
   fixedBody=world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-  const C=RAPIER.ColliderDesc;
-  world.createCollider(C.cuboid(TW/2+4,3,TD/2+4).setTranslation(0,-3,0).setFriction(.95),fixedBody);
-  for(const sx of [-1,1]){
-    world.createCollider(C.cuboid(3,TH*2,TD/2+4).setTranslation(sx*(TW/2+3),TH,0),fixedBody);
-    world.createCollider(C.cuboid(TW/2+4,TH*2,3).setTranslation(0,TH,sx*(TD/2+3)),fixedBody);}
+  buildTankColliders();
   rebuildGround();
   for(const o of S.objects)createBody(o);
 }
@@ -877,14 +1018,24 @@ function objAction(a){
 
 
 // ---------------- rêu (tô bằng cọ lên bề mặt đá / lũa / đồ trang trí) ----------------
-const MOSSMAX=2200,MOSSPAL=[[.24,.5,.13],[.14,.35,.1],[.42,.52,.13],[.1,.34,.24]];
+const MOSSMAX=2200,MOSSPAL=[[.24,.5,.13],[.14,.35,.1],[.4,.52,.14],[.19,.42,.15]];
 const brush={on:false,mode:'add',r:3,dens:3,size:1,pal:0,painting:false,last:null};
-const mossGeo=(()=>{let g=new THREE.IcosahedronGeometry(1,1);g.deleteAttribute('uv');g.deleteAttribute('normal');g=mergeVertices(g);
-  const P=g.attributes.position,c=new Float32Array(P.count*3);
-  for(let i=0;i<P.count;i++){let x=P.getX(i),y=P.getY(i),z=P.getZ(i);const n=1+(noise3(x*2.3+5,y*2.3,z*2.3,4)-.5)*.85;
-    x*=n;z*=n;y=Math.max(y,-.2)*.62*n;P.setXYZ(i,x,y,z);const k=.5+.5*clamp((y+.2)/.75,0,1);c[i*3]=c[i*3+1]=c[i*3+2]=k;}
-  g.setAttribute('color',new THREE.BufferAttribute(c,3));g.computeVertexNormals();return g;})();
-const mossMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,emissive:0x0a1a06});
+const mossGeo=(()=>{ // chùm sợi rêu: nhiều lá mảnh xòe ra từ một gốc, gốc tối ngọn sáng
+  const pos=[],col=[],idx=[],r=rng(5),B=9;
+  for(let k=0;k<B;k++){
+    const ang=k/B*TAU+r()*.5,tilt=.25+r()*.75,len=.75+r()*.55,w=.2+r()*.1,ca=Math.cos(ang),sa=Math.sin(ang);
+    const at=(t,side)=>{ // t:0..1 dọc lá, side:-1..1
+      const hh=Math.sin(tilt)*0+t*len*Math.cos(tilt*.55),out=t*t*len*Math.sin(tilt)*.9+t*len*Math.sin(tilt)*.35,ww=w*(1-t)*(1-t*.2)*side;
+      return [out*ca-ww*sa,hh,out*sa+ww*ca];};
+    const base=pos.length/3;
+    const P=[at(0,-1),at(0,1),at(.5,-1),at(.5,1),at(1,0)];
+    for(const p of P)pos.push(...p);
+    const sh=[.4,.4,.75,.75,1.05];for(const v of sh)col.push(v,v,v);
+    idx.push(base,base+1,base+2,base+1,base+3,base+2,base+2,base+3,base+4);
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  g.setIndex(idx);g.computeVertexNormals();return g;})();
+const mossMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,emissive:0x0b1c07,side:THREE.DoubleSide});
 function buildMoss(uid){
   const o=objRec(uid),root=rootOf(uid);if(!o||!root)return;
   const arr=o.moss||[],n=Math.min(arr.length/8|0,MOSSMAX);let m=root.userData.mossMesh;
@@ -957,6 +1108,7 @@ function updateSubstrateGeometry(x0,z0,rad){
     for(let i=0;i<n;i++){const x=SP.getX(i*2);SP.setY(i*2+1,subH(x,z));}SP.needsUpdate=true;subSkirt.geometry.computeVertexNormals();}
 }
 function terrainStamp(cx,cz,skipGeo){
+  if(floorMoss)floorMoss.visible=false;
   if(!S.substrate.hm)S.substrate.hm=new Float32Array(HM_W*HM_H);
   const hm=S.substrate.hm,r=tb.r,gx=(cx+TW/2)/TW*(HM_W-1),gz=(cz+TD/2)/TD*(HM_H-1),cellX=TW/(HM_W-1),cellZ=TD/(HM_H-1);
   const rx=Math.ceil(r/cellX)+1,rz=Math.ceil(r/cellZ)+1,str=tb.str;
@@ -977,7 +1129,7 @@ function terrainStamp(cx,cz,skipGeo){
 function terrainEnd(){
   if(!tb.prev)return;const prev={...S.substrate,hm:tb.prev};
   for(const o of S.objects){if(o.y==null)continue;const r=rootOf(o.uid);o.y+=subH(o.x,o.z)-subH(o.x,o.z,prev);if(r)applyTransform(o,.3);}
-  lastSub={...S.substrate};rebuildGround();tb.prev=null;save();
+  lastSub={...S.substrate};rebuildGround();buildFloorMoss();tb.prev=null;save();
 }
 function setTerrainBrush(on){
   if(on&&brush.on)setBrush(false);
@@ -1043,9 +1195,10 @@ cvs.addEventListener('pointermove',e=>{
     else tbRing.visible=false;return;}
   if(brush.on){const b=brushHit();updateBrushRing(b);
     if(brush.painting&&b){const p=b.h.point;if(!brush.last||brush.last.distanceTo(p)>brush.r*.5){brush.last=p.clone();mossStamp(b);}}return;}
+  if(drag&&drag.pan){const k=2*fitD*camState.zoom*Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)/innerHeight;camState.px-=(e.clientX-drag.x)*k;camState.py+=(e.clientY-drag.y)*k;drag.x=e.clientX;drag.y=e.clientY;camTargets();return;}
   if(placing){const p=pointTarget(null);placing.root.visible=!!p;if(p)placing.root.position.copy(p);return;}
   if(drag&&drag.light){const L=S.lights.find(l=>l.id===drag.light),o=ray.ray.origin,d=ray.ray.direction;
-    if(L&&d.y>0){const t=(TH-2.2-o.y)/d.y;L.x=clamp(o.x+d.x*t,-TW/2+4,TW/2-4);L.z=clamp(o.z+d.z*t,-TD/2+3,TD/2-3);syncLight(L);syncLightInputs(L);}return;}
+    if(L&&Math.abs(d.y)>1e-4){const hy=LO.get(L.id).handle.position.y,t=(hy-o.y)/d.y;if(t>0){L.x=o.x+d.x*t;L.z=o.z+d.z*t;clampTankXZ(L,3);syncLight(L);syncLightInputs(L);}}return;}
   if(drag&&drag.obj){const o=objRec(drag.obj),p=pointTarget(drag.obj);
     if(o&&p){const x=clamp(p.x+drag.dx,-TW/2+3,TW/2-3),z=clamp(p.z+drag.dz,-TD/2+3,TD/2-3);
       o.x=x;o.z=z;o.y=surfaceY(x,z,drag.obj)+.2;
@@ -1055,6 +1208,7 @@ cvs.addEventListener('pointermove',e=>{
 });
 cvs.addEventListener('pointerdown',e=>{
   if(e.button!==0)return;setNdc(e);
+  if(e.shiftKey){drag={pan:true,x:e.clientX,y:e.clientY};cvs.setPointerCapture(e.pointerId);cvs.style.cursor='move';return;}
   if(tb.on){tb.painting=true;tb.last=null;tb.prev=S.substrate.hm?Float32Array.from(S.substrate.hm):new Float32Array(HM_W*HM_H);const h=tbHit();if(h){tb.last=h.point.clone();terrainStamp(h.point.x,h.point.z);}cvs.setPointerCapture(e.pointerId);return;}
   if(brush.on){brush.painting=true;brush.last=null;const b=brushHit();if(b){brush.last=b.h.point.clone();mossStamp(b);}cvs.setPointerCapture(e.pointerId);return;}
   if(placing){const p=pointTarget(null);if(p)commitPlacing(p);return;}
@@ -1076,9 +1230,11 @@ cvs.addEventListener('pointerup',()=>{
 });
 cvs.addEventListener('contextmenu',e=>{e.preventDefault();cancelPlacing();});
 cvs.addEventListener('wheel',e=>{
-  if(selObj==null)return;setNdc(e);if(pickObject()!==selObj)return;e.preventDefault();
-  const o=objRec(selObj);scaleObj(o,o.scale*(1-e.deltaY*.0015));
+  e.preventDefault();
+  if(selObj!=null){setNdc(e);if(pickObject()===selObj){const o=objRec(selObj);scaleObj(o,o.scale*(1-e.deltaY*.0015));return;}}
+  zoomAt(e);
 },{passive:false});
+cvs.addEventListener('dblclick',e=>{if(selObj==null&&!placing&&!brush.on&&!tb.on)camReset();});
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;const k=e.key.toLowerCase();
   if(k==='h')setUi(!uiOn);
@@ -1496,24 +1652,45 @@ async function fillThumbs(){const run=++thumbRun,imgs=[...document.querySelector
     await new Promise(r=>setTimeout(r,10));}}
 
 // ---------------- UI ----------------
-let uiOn=true,tab='light';
-const TABS=[['light','Đèn'],['sub','Nền'],['plant','Cây'],['rock','Đá / Lũa'],['decor','Trang trí'],['moss','Rêu'],['fish','Cá'],['water','Nước']];
+let uiOn=true,tab=FIRSTRUN?'tank':'light';
+const TABS=[['tank','Bể'],['light','Đèn'],['sub','Nền'],['plant','Cây'],['rock','Đá / Lũa'],['decor','Trang trí'],['moss','Rêu'],['fish','Cá'],['water','Nước']];
 function sl(label,g,k,min,max,step,v){return `<div class="row"><span>${label}</span><input type="range" data-g="${g}" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${v}"></div>`;}
 function chk(label,g,k,v){return `<label class="chk"><input type="checkbox" data-g="${g}" data-k="${k}" ${v?'checked':''}> ${label}</label>`;}
 function renderTabs(){$('#tabs').innerHTML=TABS.map(([k,n])=>`<button class="${k===tab?'on':''}" data-tab="${k}">${n}</button>`).join('');}
 function renderQual(){$('#qual').innerHTML=Object.entries(Q).map(([k,q])=>`<button class="${S.quality===k?'on':''}" data-q="${k}">${q.name}</button>`).join('');}
 function renderBody(){
   const el=$('#body');let h='';
-  if(tab==='light'){
+  if(tab==='tank'){
+    const T=S.tank,ic={aquarium:'<svg viewBox="0 0 64 44"><rect x="6" y="8" width="52" height="28" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M8 24q10-6 20 0t24 0v10H8z" fill="currentColor" opacity=".35"/></svg>',
+      box:'<svg viewBox="0 0 64 44"><rect x="8" y="10" width="48" height="22" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="4" y="32" width="56" height="6" fill="currentColor" opacity=".6"/><circle cx="32" cy="7" r="2.2" fill="currentColor"/></svg>',
+      gem:'<svg viewBox="0 0 64 44"><path d="M22 4h20l8 8v20l-8 8H22l-8-8V12z" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="18" y="12" width="28" height="20" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".6"/></svg>'};
+    const seg=(key,items)=>`<div class="segrow" style="flex-wrap:wrap">${items.map(([v,n])=>`<button class="b ${T[key]===v?'on':''}" data-tset="${key}:${v}" style="flex:1 1 30%">${n}</button>`).join('')}</div>`;
+    h=`<div class="lab" style="margin-top:0">Kiểu dáng bể</div>
+    <div class="grid">${Object.entries(TANK_PRESETS).map(([k,p])=>`<div class="card ${T.preset===k?'on':''}" data-tpreset="${k}"><div class="img" style="display:grid;place-items:center;color:#9fd8c4">${ic[k]}</div><span>${p.name}</span></div>`).join('')}</div>
+    <div class="lab">Bể mẫu (bày sẵn như ảnh)</div>
+    <div class="segrow"><button class="b" data-tpl="terra1">Hộp rêu + lũa</button><button class="b" data-tpl="terra2">Kính cắt góc</button></div>
+    <div class="lab">Kích thước (cm)</div>
+    ${sl('Rộng','tank','w',30,160,1,T.w)}${sl('Cao','tank','h',20,100,1,T.h)}${sl('Sâu','tank','d',20,90,1,T.d)}${sl('Cắt góc','tank','cut',0,16,1,T.cut)}
+    <div class="lab">Đế đặt bể</div>${seg('base',[['none','Không'],['wood','Gỗ sáng'],['mahogany','Gỗ nâu đỏ'],['stone','Đá']])}
+    <div class="lab">Khung kính</div>${seg('frame',[['sili','Silicone đen'],['metal','Kim loại mảnh']])}
+    ${chk('Nắp kính + núm đồng','tank','lid',T.lid)}
+    <div class="lab">Nền tường trong bể</div>
+    <div class="grid">${Object.entries(INNER).map(([k,n])=>`<div class="card ${T.inner===k?'on':''}" data-tinner="${k}"><div class="img" style="${k==='none'?'background:linear-gradient(135deg,#0d1416,#243034)':k==='black'?'background:#060707':`background-image:url(${(k==='moss'?subTex('moss'):kindTex(k)).url})`}"></div><span>${n.name}</span></div>`).join('')}</div>
+    ${chk('Phủ cả hai bên hông','tank','sides',T.sides)}
+    <div class="lab">Góc nhìn</div>${seg('view',[['show','Toàn cảnh (như ảnh)'],['fill','Phủ kín màn hình']])}
+    ${sl('Zoom (cuộn chuột)','camz','zoom',.1,1.6,.01,camState.zoom)}
+    <button class="b" data-camreset style="width:100%;margin-top:6px">Đặt lại góc nhìn</button>
+    <p class="muted">Cuộn chuột trên khoảng trống để zoom vào chỗ con trỏ, giữ Shift và kéo để dịch, bấm đúp để về lại.</p>`;
+  }else if(tab==='light'){
     const L=S.lights.find(l=>l.id===selLight);
     h=`<div class="add">${Object.entries(LTYPE).map(([k,p])=>`<button class="b" data-add="${k}">+ ${p.name}</button>`).join('')}</div>
     <div class="list">${S.lights.length?S.lights.map(l=>`<div class="li ${l.id===selLight?'on':''}" data-lid="${l.id}"><i style="background:${l.color};color:${l.color}"></i>${LTYPE[l.type].name} #${l.id}</div>`).join('')
-      :'<p class="muted">Chưa có đèn. Bấm nút ở trên để thêm (tối đa 4).<br>Mẹo: kéo quả cầu sáng trên mặt nước để dời đèn.</p>'}</div>`;
-    if(L)h+=`<div class="ed">${sl('Ngang','light','x',-TW/2+4,TW/2-4,.5,L.x)}${sl('Trước / sau','light','z',-TD/2+3,TD/2-3,.5,L.z)}
+      :'<p class="muted">Chưa có đèn. Bấm nút ở trên để thêm (tối đa 6).<br>Mẹo: kéo quả cầu sáng trên mặt nước để dời đèn.</p>'}</div>`;
+    if(L)h+=`<div class="ed">${sl('Ngang','light','x',-TW/2+4,TW/2-4,.5,L.x)}${sl('Trước / sau','light','z',-TD/2+3,TD/2-3,.5,L.z)}${(()=>{const P=LTYPE[L.type];return P.abs?sl('Độ cao (từ sàn)','light','h',2,TH-2,.5,L.h??P.h):sl('Độ cao trên miệng bể','light','h',2,70,.5,L.h??P.h??10);})()}
       <div class="lab">Màu ánh sáng</div><div class="sw">${SWATCH.map(c=>`<b data-col="${c}" style="background:${c}" class="${c===L.color?'on':''}"></b>`).join('')}
       <input type="color" data-g="light" data-k="color" value="${L.color}"></div>
-      ${sl('Độ sáng','light','intensity',0,14,.1,L.intensity)}${sl('Độ rộng chùm','light','angle',8,75,1,L.angle)}
-      ${chk('Vệt sáng gợn nước','light','caustics',L.caustics)}${chk('Tia sáng xuyên nước','light','rays',L.rays)}
+      ${sl('Độ sáng','light','intensity',0,14,.1,L.intensity)}${LTYPE[L.type].point?'':sl('Độ rộng chùm','light','angle',8,75,1,L.angle)}
+      ${LTYPE[L.type].point?'':chk('Vệt sáng gợn nước','light','caustics',L.caustics)+chk('Tia sáng xuyên nước','light','rays',L.rays)}
       ${Q[S.quality].shadow?'':'<p class="muted">Chất lượng Thấp: tắt bóng đổ và vệt sáng gợn.</p>'}
       <button class="b danger" data-dellight style="width:100%;margin-top:6px">Xóa đèn này</button></div>`;
   }else if(tab==='sub'){
@@ -1558,7 +1735,7 @@ function renderBody(){
       ${sl('Hạt lơ lửng','water','motes',0,1500,50,w.motes)}${chk('Bọt khí tự nhiên','water','bubbles',w.bubbles)}
       <div class="lab">Ngoài bể</div>
       ${sl('Ánh sáng phòng','water','room',0,1,.01,w.room)}
-      <div class="segrow">${[['room','Tường phòng'],['black','Phông đen'],['blue','Xanh đậm'],['teal','Xanh ngọc']].map(([k,n])=>`<button class="b ${w.back===k?'on':''}" data-back="${k}">${n}</button>`).join('')}</div>
+      <div class="segrow">${[['concrete','Bê tông'],['room','Vữa'],['black','Đen'],['blue','Xanh đậm'],['teal','Xanh ngọc']].map(([k,n])=>`<button class="b ${w.back===k?'on':''}" data-back="${k}">${n}</button>`).join('')}</div>
       ${w.back==='room'?`<div class="lab">Màu tường</div><div class="sw">${WALLS.map(c=>`<b data-wall="${c}" style="background:${c}" class="${c===w.wall?'on':''}"></b>`).join('')}<input type="color" data-g="water" data-k="wall" value="${w.wall}"></div>`:''}`;
   }
   el.innerHTML=h;fillThumbs();
@@ -1576,18 +1753,25 @@ $('#body').addEventListener('input',e=>{
   const g=t.dataset.g,k=t.dataset.k;if(!g)return;
   if(g==='brush'){brush[k]=+t.value;return;}
   if(g==='tb'){tb[k]=+t.value;return;}
+  if(g==='camz'){camState.zoom=+t.value;camTargets();return;}
+  if(g==='tank'){S.tank[k]=t.type==='checkbox'?t.checked:+t.value;S.tank.preset='custom';applyTankSoon();return;}
   const v=t.type==='checkbox'?t.checked:t.type==='range'?+t.value:t.value;
   if(g==='light'){const L=S.lights.find(l=>l.id===selLight);if(!L)return;L[k]=v;syncLight(L);
     if(k==='color'){const d=document.querySelector(`[data-lid="${L.id}"] i`);if(d){d.style.background=v;d.style.color=v;}}}
   if(g==='sub'){S.substrate[k]=v;clearTimeout(subT);subT=setTimeout(buildSubstrate,60);}
-  if(g==='water'){S.water[k]=v;}
+  if(g==='water'){S.water[k]=v;if(k==='level'){clearTimeout(subT);subT=setTimeout(buildFloorMoss,200);}}
   applyWater();save();
 });
 let subT=0;
 $('#body').addEventListener('click',e=>{
-  const t=e.target.closest('[data-tbrush],[data-tmode],[data-tclear],[data-brush],[data-bmode],[data-bpal],[data-clearmoss],[data-feed],[data-clearfish],[data-add],[data-lid],[data-col],[data-dellight],[data-sub],[data-item],[data-wcol],[data-back],[data-wall]');if(!t)return;
+  const t=e.target.closest('[data-tset],[data-tpreset],[data-tinner],[data-tpl],[data-camreset],[data-tbrush],[data-tmode],[data-tclear],[data-brush],[data-bmode],[data-bpal],[data-clearmoss],[data-feed],[data-clearfish],[data-add],[data-lid],[data-col],[data-dellight],[data-sub],[data-item],[data-wcol],[data-back],[data-wall]');if(!t)return;
   const d=t.dataset;
-  if('tbrush' in d)setTerrainBrush(!tb.on);
+  if(d.tset){const [k,v]=d.tset.split(':');S.tank[k]=v;S.tank.preset='custom';if(k==='view'){camReset();resize();save();renderBody();}else{applyTank();renderBody();}}
+  else if(d.tpreset){setTankPreset(d.tpreset);}
+  else if(d.tinner){S.tank.inner=d.tinner;S.tank.preset='custom';applyTank();renderBody();}
+  else if(d.tpl){loadTemplate(d.tpl);}
+  else if('camreset' in d){camReset();renderBody();}
+  else if('tbrush' in d)setTerrainBrush(!tb.on);
   else if(d.tmode){tb.mode=d.tmode;renderBody();}
   else if('tclear' in d){if(confirm('Xóa toàn bộ chỉnh sửa địa hình bằng cọ?')){S.substrate.hm=null;buildSubstrate();save();}}
   else if('brush' in d)setBrush(!brush.on);
@@ -1615,7 +1799,7 @@ $('#clear').onclick=()=>{
   for(const r of objRoots)scene.remove(r);objRoots.length=0;S.objects=[];
   S.substrate={...DEF.substrate};S.water={...DEF.water};S.fish={};S.critters={};syncFish();syncCritters();buildSubstrate();refreshAll();save();
 };
-function setUi(on){uiOn=on;document.body.classList.toggle('noui',!on);for(const o of LO.values())o.handle.visible=on;updateRing();
+function setUi(on){uiOn=on;if(typeof applyViewOffset==='function'){applyViewOffset();camTargets();}document.body.classList.toggle('noui',!on);for(const o of LO.values())o.handle.visible=on;updateRing();
   if(!on){cancelPlacing();cvs.style.cursor='none';}else cvs.style.cursor='';}
 let toastT=0;
 function toast(msg,ms){$('#toast').textContent=msg;clearTimeout(toastT);if(ms)toastT=setTimeout(()=>$('#toast').textContent='',ms);}
@@ -1808,19 +1992,162 @@ MGR.addEventListener('click',e=>{
   else if(d.ibadd!==undefined)inboxAdd(+d.ibadd);
 });
 
+
+// ---------------- nền tường bên trong bể (rêu 3D, đá phiến, vỏ bần, đen) ----------------
+const INNER={none:{name:'Trong suốt'},moss:{name:'Tường rêu'},slate:{name:'Đá phiến'},cork:{name:'Vỏ bần / gỗ'},black:{name:'Đen mờ'}};
+function innerEdges(){
+  const T=S.tank,pts=footprint(.2),n=pts.length,out=[];
+  for(let i=0;i<n;i++){
+    const a=pts[i],b=pts[(i+1)%n],mx=(a[0]+b[0])/2,mz=(a[1]+b[1])/2,dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz);
+    const front=mz>TD/2-2.2||(mz>0&&Math.abs(dx)>1e-6&&Math.abs(dz)>1e-6);   // mặt trước và hai góc cắt phía trước bỏ trống
+    const back=mz<-TD/2+2.2;
+    if(front||(!back&&!T.sides))continue;
+    let ry=Math.atan2(-dz,dx);const nx=Math.sin(ry),nz=Math.cos(ry);if(nx*mx+nz*mz>0)ry+=Math.PI;   // pháp tuyến hướng vào trong
+    out.push({a,b,mx,mz,len,ry,nx:Math.sin(ry),nz:Math.cos(ry)});
+  }
+  return out;
+}
+function buildInnerWalls(){
+  const T=S.tank;if(!T.inner||T.inner==='none')return;
+  const edges=innerEdges(),addM=m=>{m.castShadow=false;m.receiveShadow=true;m.userData.keepGeo=false;shellG.add(m);return m;};
+  for(const e of edges){
+    let mat;
+    if(T.inner==='moss'){const t=subTex('moss'),map=t.map.clone(),bump=t.bump.clone();for(const x of [map,bump]){x.needsUpdate=true;x.repeat.set(e.len/t.rep,TH/t.rep);}
+      mat=new THREE.MeshStandardMaterial({map,bumpMap:bump,bumpScale:3,roughness:1,color:new THREE.Color(.8,.9,.75)});}
+    else if(T.inner==='black')mat=new THREE.MeshStandardMaterial({color:0x060707,roughness:.92});
+    else mat=texMat(T.inner,e.len/32,TH/32,{bump:3,rough:.9,side:THREE.DoubleSide});
+    const p=new THREE.Mesh(new THREE.PlaneGeometry(e.len,TH),mat);
+    p.position.set(e.mx,TH/2,e.mz);p.rotation.y=e.ry;addM(p);
+  }
+  // rêu 3D phủ nổi lên trên tường: lớp nền sẫm to + lớp hạt sáng nhỏ
+  if(T.inner==='moss'&&S.quality!=='low'){
+    const area=edges.reduce((a,e)=>a+e.len*TH,0),cap=S.quality==='high'?9000:5500,N=Math.min(cap,Math.round(area/.55));
+    if(N>20){
+      const m=new THREE.InstancedMesh(mossGeo,mossMat,N);m.userData.keepGeo=true;m.frustumCulled=false;m.raycast=()=>{};
+      const tot=edges.reduce((a,e)=>a+e.len,0),r=rng(77),q=new THREE.Quaternion(),UP=new V3(0,1,0),nv=new V3(),pv=new V3(),sv=new V3(),mat4=new THREE.Matrix4(),col=new THREE.Color();
+      for(let i=0;i<N;i++){
+        let u=r()*tot,e=edges[0];for(const ed of edges){if(u<=ed.len){e=ed;break;}u-=ed.len;}
+        const t=u/e.len,h=.8+r()*(TH-1.6),dx=e.b[0]-e.a[0],dz=e.b[1]-e.a[1],big=r()<.3,sz=big?.8+r()*.7:.28+r()*.5;
+        const px=e.a[0]+dx*t,pz=e.a[1]+dz*t;
+        nv.set(e.nx+(r()-.5)*.9,(r()-.5)*.9,e.nz+(r()-.5)*.9).normalize();q.setFromUnitVectors(UP,nv);
+        pv.set(px+e.nx*sz*(big?.2:.5),h,pz+e.nz*sz*(big?.2:.5));sv.set(sz,sz*(.8+r()*.5),sz);mat4.compose(pv,q,sv);m.setMatrixAt(i,mat4);
+        const pal=big?MOSSPAL[1]:MOSSPAL[r()<.55?0:r()<.5?2:3],j=big?.45+r()*.3:.6+r()*.8;col.setRGB(pal[0]*j,pal[1]*j,pal[2]*j);m.setColorAt(i,col);
+      }
+      m.instanceMatrix.needsUpdate=true;m.instanceColor.needsUpdate=true;m.castShadow=false;m.receiveShadow=true;shellG.add(m);
+    }
+  }
+}
+
+// ---------------- bể mẫu (giống ảnh tham khảo) ----------------
+const TEMPLATES={
+  terra1:{name:'Hộp rêu + lũa',tank:'box',
+    substrate:{type:'moss',slope:.32,hill:.4,hillX:.2,rough:.5},water:{level:.03,room:.1,back:'concrete',ambient:1.0},
+    lights:[{type:'goose',x:-6,z:-2,h:15,intensity:11,angle:46,color:'#fff4dc'}],
+    objects:[['ph_trunk2',6,-3,.78,-.55],['ph_anth2',-2,-8,1.5,0],['ph_fern1',-24,-4,1.5,.4],['ph_fern3',26,-9,1.4,2],['ph_cala1',-14,7,1.3,1],['ph_mossA3',-8,10,.8,.3],['ph_grs1',18,9,1.4,0],['ph_grs2',9,12,1.3,1],['ph_grs3',-26,10,1.4,2],['ph_moss',0,13,1.6,0],['ph_peri2',14,-12,1.2,1]]},
+  terra2:{name:'Kính cắt góc',tank:'gem',
+    substrate:{type:'moss',slope:.5,hill:.85,hillX:.25,rough:.6},water:{level:.03,room:.08,back:'concrete',ambient:.95},
+    lights:[{type:'goose',x:0,z:2,h:16,intensity:10,angle:40,color:'#fff4dc'},{type:'accent',x:15,z:-9,h:12,intensity:2.6,color:'#4a7bff'}],
+    objects:[['ph_bould5',-11,4,1.1,.4],['ph_bould6',8,10,.9,1.2],['ph_peri1',3,0,1.9,0],['ph_cala2',-12,-6,1.3,.8],['ph_fern2',11,6,1.5,2.2],['ph_anth1',-3,9,1.3,1],['ph_grs2',-14,11,1.4,0],['ph_grs3',2,13,1.4,1],['ph_face2',-4,-12,.7,.2]]}
+};
+function applyTemplateData(T){
+  S.tank={preset:T.tank,...TANK_PRESETS[T.tank]};
+  S.substrate={...DEF.substrate,...T.substrate,hm:null};
+  S.water={...DEF.water,...T.water};
+  S.lights=T.lights.map(l=>({id:S.uid++,caustics:true,rays:l.type!=='accent',angle:LTYPE[l.type].angle,...l}));
+  const q=new THREE.Quaternion();
+  S.objects=[];for(const [item,x,z,sc,yaw] of T.objects){if(!LIBI[item])continue;
+    q.setFromAxisAngle(AX.y,yaw);S.objects.push({uid:S.uid++,item,seed:(Math.random()*1e9)|0,x,z,y:(subH(x,z,S.substrate)||0)+2,q:[q.x,q.y,q.z,q.w],scale:sc,_awake:true});}
+}
+function loadTemplate(id){
+  const T=TEMPLATES[id];if(!T)return;
+  if(!confirm(`Thay toàn bộ bể hiện tại bằng bể mẫu "${T.name}"?`))return;
+  cancelPlacing();selectObj(null);if(brush.on)setBrush(false);if(tb.on)setTerrainBrush(false);
+  for(const L of [...S.lights]){const o=LO.get(L.id);if(o){for(const m of [o.spot,o.target,o.cone,o.handle,o.arm])if(m)scene.remove(m);if(o.arm)disposeGroup(o.arm);LO.delete(L.id);}}
+  for(const o of [...S.objects]){const r=rootOf(o.uid);if(r){scene.remove(r);objRoots.splice(objRoots.indexOf(r),1);}removeBody(o.uid);}
+  S.fish={};S.critters={};syncFish();syncCritters();
+  applyTemplateData(T);
+  applyTankDims();
+  for(const L of S.lights)buildLight(L);
+  applyTank();
+  for(const o of S.objects){applyTankDims();spawnObject(o);}
+  selLight=S.lights[0]?.id??null;refreshAll();save();
+}
+// ---------------- rêu 3D phủ trên mặt nền (khi chọn nền rêu) ----------------
+let floorMoss=null;
+function buildFloorMoss(){
+  if(floorMoss){scene.remove(floorMoss);floorMoss.dispose();floorMoss=null;}
+  if(S.substrate.type!=='moss'||S.quality==='low')return;
+  const cap=S.quality==='high'?8000:5000,N=Math.min(cap,Math.round(TW*TD*1.7)),wl=WL(),r=rng(31);
+  const m=new THREE.InstancedMesh(mossGeo,mossMat,N);m.frustumCulled=false;m.raycast=()=>{};
+  const q=new THREE.Quaternion(),UP=new V3(0,1,0),nv=new V3(),pv=new V3(),sv=new V3(),mat4=new THREE.Matrix4(),col=new THREE.Color();let n=0;
+  for(let i=0;i<N;i++){
+    const p={x:(r()-.5)*TW,z:(r()-.5)*TD};clampTankXZ(p,.8);const y=subH(p.x,p.z);if(y<wl+.2)continue;
+    const e=.7,gx=subH(p.x+e,p.z)-subH(p.x-e,p.z),gz=subH(p.x,p.z+e)-subH(p.x,p.z-e);
+    nv.set(-gx/(2*e)+(r()-.5)*.5,1,-gz/(2*e)+(r()-.5)*.5).normalize();q.setFromUnitVectors(UP,nv);
+    const big=r()<.25,sz=big?.7+r()*.6:.3+r()*.5;
+    pv.set(p.x,y-sz*.1,p.z);sv.set(sz,sz*(.7+r()*.5),sz);mat4.compose(pv,q,sv);m.setMatrixAt(n,mat4);
+    const pal=big?MOSSPAL[1]:MOSSPAL[r()<.6?0:r()<.5?2:3],j=big?.5+r()*.3:.65+r()*.75;col.setRGB(pal[0]*j,pal[1]*j,pal[2]*j);m.setColorAt(n,col);n++;
+  }
+  m.count=n;m.instanceMatrix.needsUpdate=true;if(m.instanceColor)m.instanceColor.needsUpdate=true;m.castShadow=false;m.receiveShadow=true;
+  floorMoss=m;scene.add(m);
+}
+// ---------------- đổi kiểu / kích thước bể ----------------
+let tankT=0;
+function applyTank(){
+  applyTankDims();
+  glassBottom.geometry.dispose();glassBottom.geometry=footprintGeo();
+  surface.geometry.dispose();surface.geometry=footprintGeo().rotateX(Math.PI);
+  buildTankShell();fillMotes();
+  FBX[0]=-TW/2+7;FBX[1]=TW/2-7;FBZ[0]=-TD/2+6;FBZ[1]=TD/2-6;
+  makeMirror();buildSubstrate();
+  if(world)buildTankColliders();
+  for(const L of S.lights){clampTankXZ(L,3);if(LO.get(L.id)){LO.get(L.id).angle=null;syncLight(L);}}
+  for(const o of S.objects){clampTankXZ(o,3);const r=rootOf(o.uid);if(r)applyTransform(o,.5);}
+  for(const fi of fishes){clampTankXZ(fi,6);fi.y=Math.min(fi.y,TH-3);}
+  for(const c of critters)clampTankXZ(c,6);
+  camReset();resize();save();
+}
+function applyTankSoon(){clearTimeout(tankT);tankT=setTimeout(applyTank,120);}
+function setTankPreset(id){S.tank={preset:id,...TANK_PRESETS[id]};if(id!=='aquarium'&&S.water.level>.5)S.water.level=.04;if(id==='aquarium'&&S.water.level<.2)S.water.level=.9;camReset();applyTank();refreshAll();}
 // ---------------- quality / resize ----------------
 function applyQuality(){
   const q=Q[S.quality];renderer.setPixelRatio(q.pr);composer.setPixelRatio(q.pr);
   renderer.shadowMap.enabled=q.shadow>0;for(const L of S.lights)syncLight(L);
   scene.traverse(o=>{if(o.material)o.material.needsUpdate=true;});makeMirror();resize();
 }
-const camBase=new V3(),look=new V3(0,TH*.5,-TD*.25);
+const camBase=new V3(),look=new V3(0,TH*.5,-TD*.25),lookT=new V3(),camState={zoom:1,px:0,py:0};
+let fitD=100,fitC=new V3(),camEl=0;
+function camFit(){
+  const w0=innerWidth,uiPad=(typeof uiOn!=='undefined'&&uiOn&&w0>760)?336:0,asp=camera.aspect*(w0-uiPad)/w0,tf=Math.tan(THREE.MathUtils.degToRad(camera.fov)/2);
+  if(S.tank.view==='show'){
+    const gh=S.lights.reduce((m,l)=>LTYPE[l.type].arm?Math.max(m,lightY(l)+4):m,0),top=Math.max(TH+(S.tank.lid?4:0),gh),totH=top+BASEH,totW=TW+(BASEH>0?9:4);
+    fitD=Math.max(totH*1.28/(2*tf),totW*1.3/asp/(2*tf));fitC.set(0,(top-BASEH)/2,0);camEl=.1;
+  }else{
+    const visH=Math.min(TH,TW/asp)/1.1;camD=visH/(2*tf);fitD=camD+TD*.75;fitC.set(0,TH*.5,-TD*.25);camEl=0;
+  }
+}
+function camTargets(){
+  camFit();
+  const zmin=Math.max(.1,(TD/2+4)/fitD),z=clamp(camState.zoom,zmin,1.8);camState.zoom=z;
+  const D=fitD*z;
+  camState.px=clamp(camState.px,-TW*.6,TW*.6);camState.py=clamp(camState.py,-TH*.7,TH*.7);
+  lookT.set(fitC.x+camState.px,fitC.y+camState.py,fitC.z);
+  camBase.set(lookT.x,lookT.y+Math.sin(camEl)*D,lookT.z+Math.cos(camEl)*D);
+}
+function camReset(){camState.zoom=1;camState.px=0;camState.py=0;camTargets();}
+function zoomAt(e){
+  setNdc(e);const o=ray.ray.origin,d=ray.ray.direction;if(Math.abs(d.z)<1e-4)return;
+  const t=(lookT.z-o.z)/d.z,P=o.clone().addScaledVector(d,t),z0=camState.zoom;
+  camState.zoom=z0*Math.exp(e.deltaY*.0016);camTargets();
+  const k=1-camState.zoom/z0;if(k>0){camState.px+=(P.x-lookT.x)*k;camState.py+=(P.y-lookT.y)*k;}
+  else{camState.px*=.92;camState.py*=.92;}
+  camTargets();
+}
+function applyViewOffset(){const w=innerWidth,h=innerHeight;if(typeof uiOn!=='undefined'&&uiOn&&w>760)camera.setViewOffset(w,h,168,0,w,h);else camera.clearViewOffset();camera.updateProjectionMatrix();}
 function resize(){
   const w=innerWidth,h=innerHeight;if(!w||!h)return false;
   renderer.setSize(w,h);composer.setSize(w,h);bloom.resolution.set(w/2,h/2);
-  camera.aspect=w/h;const f=THREE.MathUtils.degToRad(camera.fov);
-  const visH=Math.min(TH,TW/camera.aspect)/1.1;camD=visH/(2*Math.tan(f/2));
-  camBase.set(0,TH*.5,TD/2+camD);camera.updateProjectionMatrix();
+  camera.aspect=w/h;camera.updateProjectionMatrix();applyViewOffset();camTargets();
   const sc=h*renderer.getPixelRatio()*.25;foodPts.material.uniforms.uScale.value=sc;moteMat.uniforms.uScale.value=sc;bubMat.uniforms.uScale.value=sc*1.6;
   applyWater();return true;
 }
@@ -1833,8 +2160,8 @@ function frame(now){
   if(document.hidden)return;
   const q=Q[S.quality];if(now-last<1000/q.fps-4)return;
   const dt=Math.min(.1,(now-last)/1000);last=now;const t=now/1000;U.uTime.value=t;
-  cp.set(camBase.x+mouse.x*2.2,camBase.y-mouse.y*1.3,camBase.z);
-  camera.position.lerp(cp,Math.min(1,dt*2.5));camera.lookAt(look);
+  cp.set(camBase.x+mouse.x*2.2*camState.zoom,camBase.y-mouse.y*1.3*camState.zoom,camBase.z);
+  camera.position.lerp(cp,Math.min(1,dt*3));look.lerp(lookT,Math.min(1,dt*4));camera.lookAt(look);
   {const under=camera.position.y<WL();for(const m of mirrors){m.visible=(m.userData.up!==under);m.material.uniforms.uTime.value=t;}}
   stepPhysics(dt);updateFish(dt,t);updateBubbles(dt,t);
   if(q.shadow&&S.lights.some(l=>l.caustics)){cMat.uniforms.uTime.value=t;renderer.setRenderTarget(causticRT);renderer.render(cScene,cCam);renderer.setRenderTarget(null);}
@@ -1846,14 +2173,16 @@ function frame(now){
   if(location.protocol==='file:'){$('#boot').innerHTML='<div style="text-align:center;line-height:1.7;max-width:420px">Mở bể bằng file <b>“Mở Bể Cá.command”</b><br>trong thư mục Aquarium trên Desktop<br><span style="opacity:.6">(trình duyệt không cho trang mở trực tiếp đọc mô hình 3D)</span></div>';return;}
   if(!resize()){setTimeout(boot,100);return;}
   await initCatalog();
-  camera.position.copy(camBase);camera.lookAt(look);
+  if(FIRSTRUN&&S.objects.length===0&&S.lights.length===0){S.uid=Math.max(S.uid,1);applyTemplateData(TEMPLATES.terra1);applyTankDims();}
+  buildTankShell();camTargets();
+  camera.position.copy(camBase);look.copy(lookT);camera.lookAt(look);
   buildSubstrate();for(const L of S.lights)buildLight(L);for(const o of S.objects)spawnObject(o);
   syncFish();syncCritters();
   initPhysics().catch(e=>{console.error(e);toast('Không bật được vật lý',4000);});
   applyQuality();refreshAll();
   const b=$('#boot');b.style.opacity=0;setTimeout(()=>b.remove(),600);
   requestAnimationFrame(frame);
-  window.__aq={mgr,openMgr,CAT:()=>CAT,rebuildLib,LIB:()=>LIB,FISH,tb,setTerrainBrush,terrainStamp,terrainEnd,subH,camBase,look,critters,setCritterCount,mirrors:()=>mirrors,setBrush,brush,brushHit,mossStamp,ray,WL,makeMirror,fishes,food,dropFood,setFishCount,camera,bodies,get world(){return world;},objRec,S,scene,addLight,startPlacing,commitPlacing,spawnObject,refreshAll,buildSubstrate,frame,renderer,objAction,selectObj,setUi};
+  window.__aq={loadTemplate,TEMPLATES,camState,camReset,applyTank,setTankPreset,clampTankXZ,mgr,openMgr,CAT:()=>CAT,rebuildLib,LIB:()=>LIB,FISH,tb,setTerrainBrush,terrainStamp,terrainEnd,subH,camBase,look,critters,setCritterCount,mirrors:()=>mirrors,setBrush,brush,brushHit,mossStamp,ray,WL,makeMirror,fishes,food,dropFood,setFishCount,camera,bodies,get world(){return world;},objRec,S,scene,addLight,startPlacing,commitPlacing,spawnObject,refreshAll,buildSubstrate,frame,renderer,objAction,selectObj,setUi};
 })();
 </script>
 </body>
