@@ -833,8 +833,28 @@ function rebuildLib(){
   LIB=next;LIBI=Object.fromEntries(LIB.map(i=>[i.id,i]));
 }
 rebuildLib();
-const gltfLoader=new GLTFLoader(),gltfP={},protoP={};
-function loadFile(u){return gltfP[u]??=gltfLoader.loadAsync('models/'+u);}
+const gltfLoader=new GLTFLoader(),gltfP={},protoP={},urlMap=new Map();
+THREE.DefaultLoadingManager.setURLModifier(u=>urlMap.get(u)||u);
+// file .glb chú nhập từ máy khi dùng bản trực tuyến được lưu trong IndexedDB của trình duyệt
+const idb={db:null,
+  open(){return this.db||(this.db=new Promise((res,rej)=>{const r=indexedDB.open('aq3d-files',1);r.onupgradeneeded=()=>r.result.createObjectStore('f');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);}));},
+  async tx(mode,fn){const d=await this.open();return new Promise((res,rej)=>{const t=d.transaction('f',mode),st=t.objectStore('f'),rq=fn(st);t.oncomplete=()=>res(rq&&rq.result);t.onerror=()=>rej(t.error);});},
+  put(k,b){return this.tx('readwrite',st=>st.put(b,k));},get(k){return this.tx('readonly',st=>st.get(k));},del(k){return this.tx('readwrite',st=>st.delete(k));},
+  async list(){const d=await this.open();return new Promise((res,rej)=>{const out=[],t=d.transaction('f','readonly'),c=t.objectStore('f').openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push({path:'idb:'+cur.key,bytes:cur.value.size,name:cur.value.name||''});cur.continue();}else res(out);};c.onerror=()=>rej(c.error);});}};
+const blobUrls={};
+async function resolveModelUrl(url){
+  if(/^https?:/.test(url))return url;
+  if(url.startsWith('idb:')){const k=url.slice(4);if(!blobUrls[k]){const b=await idb.get(k);if(!b)throw new Error('mất file đã nhập');blobUrls[k]=URL.createObjectURL(b);}return blobUrls[k];}
+  return 'models/'+url;
+}
+function loadFile(it){
+  return gltfP[it.url]??=(async()=>{
+    let u;
+    if(it.remote){u=it.remote.gltf;for(const [rel,real] of Object.entries(it.remote.include||{}))urlMap.set(new URL(rel,u).href,real);}
+    else u=await resolveModelUrl(it.url);
+    return gltfLoader.loadAsync(u);
+  })();
+}
 function swayify(mat,h,amp){
   const m=mat.clone();
   m.onBeforeCompile=sh=>{sh.uniforms.uTime=U.uTime;sh.uniforms.uH={value:h};sh.uniforms.uAmp={value:amp};
@@ -845,7 +865,7 @@ function swayify(mat,h,amp){
   m.customProgramCacheKey=()=>'sway';return m;
 }
 function proto(it){
-  return protoP[it.id]??=loadFile(it.url).then(g=>{
+  return protoP[it.id]??=loadFile(it).then(g=>{
     const src=it.node?g.scene.getObjectByName(it.node):g.scene;
     if(!src)throw new Error('không thấy '+it.node);
     const o=src.clone(true);if(it.node)o.position.set(0,0,0);
@@ -1378,7 +1398,7 @@ async function initGlbFish(){
   for(const [id,sp] of Object.entries(FISH)){
     if(!sp.glb||fishInst[id]||sp._loading)continue;sp._loading=true;
     try{
-      const g=await gltfLoader.loadAsync(sp.glb);g.scene.updateMatrixWorld(true);
+      const g=await gltfLoader.loadAsync(await resolveModelUrl(sp.url));g.scene.updateMatrixWorld(true);
       const metas=[];g.scene.traverse(n=>{if(n.isMesh)metas.push(n);});
       if(!metas.length)throw new Error('file không có mesh');
       const geos=metas.map(n=>{const ge=n.geometry.clone();ge.applyMatrix4(n.matrixWorld);return ge;});
@@ -1811,7 +1831,10 @@ async function api(path,opt){
   const r=await fetch(path,opt);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok)throw new Error(j.error||('Lỗi '+r.status));return j;
 }
-async function saveCatalog(){if(!API)return;await api('api/catalog',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CAT)});}
+async function saveCatalog(){
+  if(!API){try{localStorage.setItem('aq3d_cat',JSON.stringify(CAT));}catch(e){}return;}
+  await api('api/catalog',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CAT)});
+}
 async function initCatalog(){
   try{
     API=/github\.io$/.test(location.hostname)?false:await fetch('api/ping',{cache:'no-store'}).then(r=>r.ok).catch(()=>false);
@@ -1819,8 +1842,11 @@ async function initCatalog(){
       const r=await fetch('api/catalog',{cache:'no-store'});
       if(r.ok){const j=await r.json();CAT={...DEFAULT_CAT,...j,hidden:j.hidden||[],items:j.items||[],fish:j.fish||[]};}
       else await saveCatalog();
+    }else{
+      const raw=localStorage.getItem('aq3d_cat');
+      if(raw){const j=JSON.parse(raw);CAT={...DEFAULT_CAT,...j,hidden:j.hidden||[],items:j.items||[],fish:j.fish||[]};}
     }
-  }catch(e){API=false;}
+  }catch(e){}
   rebuildLib();applyCatalogFish();
   S.objects=S.objects.filter(o=>LIBI[o.item]);
 }
@@ -1851,7 +1877,7 @@ function useCard(e,active){
 function renderMgr(){
   document.getElementById('mtabs').innerHTML=MTABS.map(([k,n])=>`<button class="${mgr.tab===k?'on':''}" data-mtab="${k}">${n}</button>`).join('');
   const body=document.getElementById('mbody'),foot=document.getElementById('mfoot');let h='',f='';
-  const warn=API?'':'<div class="note">Cần mở bể bằng <b>“Mở Bể Cá.command”</b> mới xóa/tải thêm được mô hình (trang này đang chạy không có máy chủ quản lý).</div>';
+  const warn=API?'':'<div class="note">Đang chạy <b>trực tuyến</b>: thay đổi được lưu trong trình duyệt này. “Xóa” là gỡ khỏi thư viện (file gốc nằm trên GitHub nên không xóa được), mô hình Poly Haven thêm vào được tải thẳng từ trang gốc khi dùng, file .glb tự nhập được lưu trong trình duyệt. Muốn xóa/tải file thật về máy thì mở bằng “Mở Bể Cá.command”.</div>';
   if(mgr.tab==='use'){
     const {act,hid}=mgrEntries(),G=[['rock','Đá / Lũa'],['plant','Cây'],['decor','Trang trí'],['fish','Cá'],['crit','Rùa &amp; cua']];
     h=warn+'<div class="note">Bỏ tích mô hình nào chú muốn <b>xóa</b>, rồi bấm “Áp dụng” ở dưới. Mô hình thật sẽ bị xóa file khỏi máy (tải lại được từ mục Tải thêm). Mô hình dựng bằng code chỉ bị ẩn, tích lại để khôi phục.</div>';
@@ -1860,7 +1886,7 @@ function renderMgr(){
     const ch=mgrChanges();
     const rmReal=ch.rm.filter(e=>e.real&&e.url),keep=new Set([...CAT.items.filter(it=>!ch.rm.some(r=>r.kind==='item'&&r.id===it.id)).map(it=>pathOf(it.url)),...(CAT.fish||[]).filter(fi=>!ch.rm.some(r=>r.kind==='fish'&&r.id===fi.id)).map(fi=>pathOf(fi.url))]);
     const del=[...new Set(rmReal.map(e=>pathOf(e.url)))].filter(p=>!keep.has(p)),bytes=del.reduce((a,p)=>a+(SIZES[p]||0),0);
-    f=`<span>${ch.rm.length||ch.rs.length?`Sẽ xóa/ẩn ${ch.rm.length} mục${ch.rs.length?`, khôi phục ${ch.rs.length}`:''}${bytes?` · giải phóng ${fmtMB(bytes)}`:''}`:'Chưa có thay đổi nào'}</span><button class="b pri" data-mapply ${(ch.rm.length||ch.rs.length)&&(API||!rmReal.length)?'':'disabled'}>Áp dụng</button>`;
+    f=`<span>${ch.rm.length||ch.rs.length?`Sẽ xóa/ẩn ${ch.rm.length} mục${ch.rs.length?`, khôi phục ${ch.rs.length}`:''}${bytes?` · giải phóng ${fmtMB(bytes)}`:''}`:'Chưa có thay đổi nào'}</span><button class="b pri" data-mapply ${(ch.rm.length||ch.rs.length)?'':'disabled'}>Áp dụng</button>${API?'':'<button class="b" data-catreset>Khôi phục danh mục mặc định</button>'}`;
   }else if(mgr.tab==='ph'){
     h=warn;
     if(!mgr.ph){h+='<div class="note">Đang tải danh sách mô hình Poly Haven…</div>';}
@@ -1869,37 +1895,40 @@ function renderMgr(){
       const top=Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,14);
       let L=mgr.ph.filter(a=>(mgr.phCat==='all'||a.cats.includes(mgr.phCat))&&(!mgr.phQ||(a.name+' '+a.tags.join(' ')+' '+a.cats.join(' ')).toLowerCase().includes(mgr.phQ.toLowerCase())));
       L.sort(mgr.phSort==='poly'?(a,b)=>a.poly-b.poly:mgr.phSort==='dl'?(a,b)=>b.dl-a.dl:(a,b)=>a.name.localeCompare(b.name));
-      h+=`<div class="note">Mô hình quét 3D thật, miễn phí (CC0) từ polyhaven.com. Bấm “Tải về” là máy chủ trên máy chú tải thẳng về, hỏi lại dung lượng trước khi tải. Mô hình trên 200K tam giác khá nặng.</div>
+      h+=`<div class="note">Mô hình quét 3D thật, miễn phí (CC0) từ polyhaven.com. ${API?'Bấm “Tải về” là máy chủ trên máy chú tải thẳng file về, hỏi lại dung lượng trước khi tải.':'Bấm “Thêm vào thư viện” để dùng mô hình, file được tải thẳng từ polyhaven.com mỗi khi dùng (trình duyệt tự nhớ lại).'} Mô hình trên 200K tam giác khá nặng.</div>
       <div class="mtools"><input type="text" id="phq" placeholder="Tìm: rock, fern, vase…" value="${esc(mgr.phQ)}"><select id="phsort"><option value="name" ${mgr.phSort==='name'?'selected':''}>Theo tên</option><option value="poly" ${mgr.phSort==='poly'?'selected':''}>Nhẹ trước</option><option value="dl" ${mgr.phSort==='dl'?'selected':''}>Phổ biến</option></select></div>
       <div class="chips"><button class="${mgr.phCat==='all'?'on':''}" data-phc="all">Tất cả (${mgr.ph.length})</button>${top.map(([c,n])=>`<button class="${mgr.phCat===c?'on':''}" data-phc="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>
       <div class="mgrid">${L.slice(0,mgr.phMax).map(a=>{
-        const inst=CAT.items.some(e=>e.url.startsWith(a.id+'/')),mx=Math.round(Math.max(...a.dims)/10),busy=mgr.busy==='dl:'+a.id;
+        const inst=CAT.items.some(e=>e.url.startsWith(a.id+'/')||e.url==='ph:'+a.id),mx=Math.round(Math.max(...a.dims)/10),busy=mgr.busy==='dl:'+a.id;
         return `<div class="mc ph"><img loading="lazy" src="https://cdn.polyhaven.com/asset_img/thumbs/${a.id}.png?width=256&height=256" alt=""><b>${esc(a.name)}</b>
         <small>${a.cats.slice(0,2).map(esc).join(', ')}<br><span class="tag ${a.poly>200000?'bad':a.poly>60000?'warn':'ok'}">${a.poly>=1000?Math.round(a.poly/1000)+'K':a.poly} tam giác</span> ~${mx} cm</small>
         ${inst?'<span class="tag ok" style="align-self:flex-start">Đã có trong thư viện</span>':`<select data-phcat="${a.id}"><option value="rock" ${guessCat(a.cats)==='rock'?'selected':''}>Loại: Đá / Lũa</option><option value="plant" ${guessCat(a.cats)==='plant'?'selected':''}>Loại: Cây</option><option value="decor" ${guessCat(a.cats)==='decor'?'selected':''}>Loại: Trang trí</option></select>
-        <button class="b pri" data-phdl="${a.id}" ${API&&!mgr.busy?'':'disabled'}>${busy?'Đang tải…':'Tải về'}</button>`}</div>`;}).join('')}</div>
+        <button class="b pri" data-phdl="${a.id}" ${!mgr.busy?'':'disabled'}>${busy?'Đang xử lý…':API?'Tải về':'Thêm vào thư viện'}</button>`}</div>`;}).join('')}</div>
       ${L.length>mgr.phMax?`<button class="b" data-phmore style="margin-top:12px;width:100%">Hiện thêm (${L.length-mgr.phMax} mô hình nữa)</button>`:''}`;
     }
   }else if(mgr.tab==='sf'){
-    h=`<div class="note"><b>Cách lấy mô hình từ Sketchfab:</b> bấm “Mở trang tải” → đăng nhập Sketchfab (miễn phí) → nút <b>Download 3D model</b> → chọn <b>glTF / GLB</b> → lưu file. Rồi bấm <button class="b" data-openinbox style="display:inline;width:auto;padding:3px 9px">Mở thư mục inbox</button> và kéo file vào đó, quay lại tab “File tự tải” để thêm vào thư viện. Chú ý giấy phép: CC0 và CC-BY dùng tự do; “NonCommercial” chỉ dùng cá nhân (đúng ý chú).</div>
+    h=`<div class="note"><b>Cách lấy mô hình từ Sketchfab:</b> bấm “Mở trang tải” → đăng nhập Sketchfab (miễn phí) → nút <b>Download 3D model</b> → chọn <b>glTF / GLB</b> → lưu file. Rồi bấm <button class="b" data-openinbox style="display:inline;width:auto;padding:3px 9px">Mở thư mục inbox</button> và kéo file vào đó (hoặc dùng nút chọn file ở tab “File tự tải”), rồi thêm vào thư viện. Chú ý giấy phép: CC0 và CC-BY dùng tự do; “NonCommercial” chỉ dùng cá nhân (đúng ý chú).</div>
     <div class="mtools"><input type="text" id="sfq" placeholder="Tìm trên Sketchfab…" value="${esc(mgr.sfQ)}"><button class="b pri" data-sfgo style="width:auto;padding:7px 14px">Tìm</button></div>
     <div class="chips">${['neon tetra','discus fish','betta fish','guppy','goldfish','clownfish','angelfish','sea turtle','crab','shrimp','coral','shipwreck','driftwood','aquarium rock','terrarium plant'].map(q=>`<button class="${mgr.sfQ===q?'on':''}" data-sfq="${q}">${q}</button>`).join('')}</div>`;
-    if(mgr.busy==='sf')h+='<div class="note">Đang tìm…</div>';
+    if(!API)h+=`<div class="note">Bản trực tuyến không gọi được Sketchfab trực tiếp: bấm tên loại ở trên (hoặc “Tìm”) để mở trang tìm kiếm Sketchfab ở thẻ mới, chỉ lọc mô hình tải được. Tải file <b>.glb</b> về máy rồi sang tab <b>File tự tải</b> để thêm vào thư viện.</div>`;
+    else if(mgr.busy==='sf')h+='<div class="note">Đang tìm…</div>';
     else if(mgr.sf)h+=`<div class="mgrid">${mgr.sf.map(m=>`<div class="mc sf"><img loading="lazy" src="${esc(m.thumb)}" alt=""><b>${esc(m.name)}</b>
       <small>${esc(m.author)}<br><span class="tag ${/CC0|^CC Attribution$/.test(m.license)?'ok':/NonCommercial/.test(m.license)?'warn':''}">${esc(m.license)}</span> ${m.faces?Math.round(m.faces/1000)+'K tam giác':''}${m.animated?' · có animation':''}</small>
       <a href="${esc(m.url)}" target="_blank" rel="noopener">Mở trang tải ↗</a></div>`).join('')||'<div class="note">Không có kết quả.</div>'}</div>`;
   }else if(mgr.tab==='inbox'){
-    h=warn+`<div class="note">Thả file <b>.glb</b> đã tải (từ Sketchfab hay nơi khác) vào thư mục <b>models/inbox</b> rồi bấm “Làm mới”. Đặt tên, chọn loại và kích thước (cm) rồi thêm vào thư viện. Với cá, bấm “Đảo đầu” nếu cá bơi bằng đuôi.</div>
-    <div class="mtools"><button class="b" data-openinbox style="width:auto;padding:7px 14px">Mở thư mục inbox</button><button class="b" data-ibrefresh style="width:auto;padding:7px 14px">Làm mới</button></div>`;
-    if(!mgr.inbox)h+='<div class="note">Đang đọc thư mục…</div>';
+    h=warn+(API?`<div class="note">Thả file <b>.glb</b> đã tải (từ Sketchfab hay nơi khác) vào thư mục <b>models/inbox</b> rồi bấm “Làm mới”. Đặt tên, chọn loại và kích thước (cm) rồi thêm vào thư viện. Với cá, bấm “Đảo đầu” nếu cá bơi bằng đuôi.</div>
+    <div class="mtools"><button class="b" data-openinbox style="width:auto;padding:7px 14px">Mở thư mục inbox</button><button class="b" data-ibrefresh style="width:auto;padding:7px 14px">Làm mới</button></div>`
+    :`<div class="note">Chọn file <b>.glb</b> đã tải về từ máy (chọn được nhiều file). File được lưu ngay trong trình duyệt này. Sau đó đặt tên, chọn loại và kích thước (cm) rồi thêm vào thư viện. Với cá, bấm “Đảo đầu” nếu cá bơi bằng đuôi.</div>
+    <div class="mtools"><input type="file" id="ibfile" accept=".glb" multiple style="flex:1"></div>`);
+    if(!mgr.inbox)h+='<div class="note">Đang đọc…</div>';
     else{
       const used=new Set([...CAT.items.map(e=>e.url),...(CAT.fish||[]).map(e=>e.url)]);
-      const L=mgr.inbox.filter(x=>x.path.startsWith('inbox/'));
-      h+=L.length?`<div class="mgrid">${L.map((x,i)=>{const done=used.has(x.path),base=x.path.split('/').pop().replace(/\.(glb|gltf)$/i,'').replace(/[_\-]+/g,' ');
+      const L=mgr.inbox.filter(x=>x.path.startsWith('inbox/')||x.path.startsWith('idb:'));
+      h+=L.length?`<div class="mgrid">${L.map((x,i)=>{const done=used.has(x.path),base=(x.name||x.path.split('/').pop()).replace(/\.(glb|gltf)$/i,'').replace(/[_\-]+/g,' ');
         return `<div class="mc" style="cursor:default"><b>${esc(base)}</b><small>${fmtMB(x.bytes)}</small>${done?'<span class="tag ok" style="align-self:flex-start">Đã thêm</span>':`
         <input type="text" data-ibn="${i}" value="${esc(base)}" placeholder="Tên"><select data-ibt="${i}"><option value="fish">Loại: Cá</option><option value="rock">Loại: Đá / Lũa</option><option value="plant">Loại: Cây</option><option value="decor">Loại: Trang trí</option></select>
         <input type="number" data-ibs="${i}" value="15" min="2" max="80" step="1" title="Kích thước lớn nhất (cm)"><label style="font-size:11px;display:flex;gap:6px;align-items:center"><input type="checkbox" data-ibf="${i}" style="position:static;width:auto"> Đảo đầu (cá)</label>
-        <button class="b pri" data-ibadd="${i}" ${API?'':'disabled'}>Thêm vào thư viện</button>`}</div>`;}).join('')}</div>`:'<div class="note">Thư mục inbox đang trống.</div>';
+        <button class="b pri" data-ibadd="${i}">Thêm vào thư viện</button>`}</div>`;}).join('')}</div>`:`<div class="note">${API?'Thư mục inbox đang trống.':'Chưa có file nào được nhập.'}</div>`;
     }
   }
   body.innerHTML=h;foot.innerHTML=f;fillThumbs();
@@ -1910,9 +1939,10 @@ async function mgrApply(){
   const rmReal=rm.filter(e=>e.real&&e.url);
   const keep=new Set([...CAT.items.filter(it=>!rm.some(r=>r.kind==='item'&&r.id===it.id)).map(it=>pathOf(it.url)),...(CAT.fish||[]).filter(fi=>!rm.some(r=>r.kind==='fish'&&r.id===fi.id)).map(fi=>pathOf(fi.url))]);
   const del=[...new Set(rmReal.map(e=>pathOf(e.url)))].filter(p=>!keep.has(p)),bytes=del.reduce((a,p)=>a+(SIZES[p]||0),0);
-  if(!confirm(`Xóa ${rm.length} mục khỏi thư viện${del.length?` và xóa file khỏi máy (${fmtMB(bytes)})`:''}?${rs.length?`\nKhôi phục ${rs.length} mục dựng sẵn.`:''}\nCác vật đang đặt trong bể thuộc mục bị xóa cũng sẽ bị gỡ.`))return;
+  if(!confirm(`${API?'Xóa':'Gỡ'} ${rm.length} mục khỏi thư viện${API&&del.length?` và xóa file khỏi máy (${fmtMB(bytes)})`:''}?${rs.length?`\nKhôi phục ${rs.length} mục dựng sẵn.`:''}\nCác vật đang đặt trong bể thuộc mục bị xóa cũng sẽ bị gỡ.`))return;
   try{
-    if(del.length)await api('api/delete',{method:'POST',body:JSON.stringify({paths:del})});
+    if(API){if(del.length)await api('api/delete',{method:'POST',body:JSON.stringify({paths:del})});}
+    else for(const p of del)if(p.startsWith('idb:'))await idb.del(p.slice(4));
     for(const e of rm){
       if(e.kind==='item'){
         for(const o of [...S.objects].filter(o=>o.item===e.id))removeObject(o.uid);
@@ -1935,11 +1965,27 @@ async function phLoad(){
   }catch(e){toast('Không tải được danh sách Poly Haven (cần mạng)',4000);mgr.ph=[];}
   renderMgr();
 }
+function gltfNodes(g){const acc=g.accessors,out=[];
+  for(const ni of g.scenes[0].nodes){const n=g.nodes[ni];if(n.mesh==null)continue;
+    const A=acc[g.meshes[n.mesh].primitives[0].attributes.POSITION],sc=n.scale||[1,1,1];
+    out.push({name:n.name||('node'+ni),size:[0,1,2].map(i=>(A.max[i]-A.min[i])*sc[i])});}
+  return out;}
+async function phAddRemote(a,cat){
+  const j=await (await fetch('https://api.polyhaven.com/files/'+a.id)).json(),gl=j.gltf,res=gl['1k']?'1k':Object.keys(gl)[0],g=gl[res].gltf;
+  const bytes=g.size+Object.values(g.include).reduce((t,v)=>t+v.size,0);
+  if(!confirm(`Thêm "${a.name}" vào thư viện?\nDung lượng khi dùng: ${fmtMB(bytes)} (Poly Haven, CC0). File tải thẳng từ polyhaven.com.${a.poly>200000?`\nLưu ý: ${Math.round(a.poly/1000)}K tam giác, khá nặng.`:''}`))return;
+  const nodes=gltfNodes(await (await fetch(g.url)).json()),remote={gltf:g.url,include:Object.fromEntries(Object.entries(g.include).map(([k,v])=>[k,v.url]))};
+  nodes.forEach((n,i)=>{const multi=nodes.length>1,eid='ph_'+a.id+(multi?'_'+(i+1):''),sz=clamp(Math.round(Math.max(...n.size)*100*.25),6,55);
+    CAT.items.push({id:eid,cat,name:a.name+(multi?' '+(i+1):''),url:'ph:'+a.id,remote,node:multi?n.name:null,size:sz,sink:cat==='plant'?0:.05,...(cat==='plant'?{sway:1}:{})});});
+  await saveCatalog();rebuildLib();refreshAll();
+  toast(`Đã thêm "${a.name}" (${nodes.length} mục) vào thư viện`,3500);
+}
 async function phDownload(id){
   const a=mgr.ph.find(x=>x.id===id);if(!a||mgr.busy)return;
   const cat=document.querySelector(`[data-phcat="${id}"]`)?.value||guessCat(a.cats);
   mgr.busy='dl:'+id;renderMgr();
   try{
+    if(!API){await phAddRemote(a,cat);mgr.busy='';renderMgr();return;}
     const info=await api('api/phinfo?id='+id);
     if(!confirm(`Tải "${a.name}" về máy?\nDung lượng: ${fmtMB(info.bytes)} (Poly Haven, CC0)${a.poly>200000?`\nLưu ý: ${Math.round(a.poly/1000)}K tam giác, khá nặng.`:''}`)){mgr.busy='';renderMgr();return;}
     toast('Đang tải '+a.name+'…');
@@ -1952,13 +1998,15 @@ async function phDownload(id){
   mgr.busy='';renderMgr();
 }
 async function sfSearch(q){
-  mgr.sfQ=q;mgr.busy='sf';renderMgr();
+  mgr.sfQ=q;
+  if(!API){window.open('https://sketchfab.com/search?q='+encodeURIComponent(q)+'&type=models&features=downloadable','_blank','noopener');renderMgr();return;}
+  mgr.busy='sf';renderMgr();
   try{mgr.sf=await api('api/sf?q='+encodeURIComponent(q));}catch(e){toast('Không tìm được: '+e.message,4000);mgr.sf=[];}
   mgr.busy='';renderMgr();
 }
-async function inboxLoad(){try{mgr.inbox=await api('api/inbox');SIZES=await api('api/sizes');}catch(e){mgr.inbox=[];}renderMgr();}
+async function inboxLoad(){try{if(API){mgr.inbox=await api('api/inbox');SIZES=await api('api/sizes');}else mgr.inbox=await idb.list();}catch(e){mgr.inbox=[];}renderMgr();}
 async function inboxAdd(i){
-  const L=mgr.inbox.filter(x=>x.path.startsWith('inbox/')),x=L[i],q=k=>document.querySelector(`[data-${k}="${i}"]`);
+  const L=mgr.inbox.filter(x=>x.path.startsWith('inbox/')||x.path.startsWith('idb:')),x=L[i],q=k=>document.querySelector(`[data-${k}="${i}"]`);
   const name=(q('ibn').value||'Mô hình').trim(),type=q('ibt').value,size=clamp(+q('ibs').value||15,2,80),flip=q('ibf').checked,id=(type==='fish'?'fish_':'user_')+Date.now().toString(36);
   if(type==='fish')CAT.fish.push({id,name,url:x.path,len:size,spd:8,flip,max:6,dot:'#cfd8dc',band:[.3,.8]});
   else CAT.items.push({id,cat:type,name,url:x.path,node:null,size,sink:type==='plant'?0:.05,...(type==='plant'?{sway:1}:{})});
@@ -1972,15 +2020,17 @@ MGR.addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.key){mgr.sel.set(t.dataset.key,t.checked);renderMgr();}
   if(t.id==='phsort'){mgr.phSort=t.value;mgr.phMax=60;renderMgr();}
+  if(t.id==='ibfile'){(async()=>{for(const [i,fl] of [...t.files].entries()){await idb.put('f'+Date.now().toString(36)+i,fl);}await inboxLoad();toast('Đã nhập '+t.files.length+' file',2500);})();}
 });
 MGR.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.id==='phq'){mgr.phQ=e.target.value;mgr.phMax=60;renderMgr();}
   if(e.key==='Enter'&&e.target.id==='sfq')sfSearch(e.target.value);
 });
 MGR.addEventListener('click',e=>{
-  const t=e.target.closest('[data-mgrp],[data-mtab],[data-mapply],[data-phc],[data-phdl],[data-phmore],[data-sfq],[data-sfgo],[data-openinbox],[data-ibrefresh],[data-ibadd]');if(!t)return;const d=t.dataset;
-  if(d.mgrp){const [c,v]=d.mgrp.split(':');for(const en of mgrEntries().act)if(en.cat===c)mgr.sel.set(en.key,v==='1');renderMgr();}
-  else if(d.mtab){mgr.tab=d.mtab;renderMgr();if(d.mtab==='ph')phLoad();if(d.mtab==='inbox')inboxLoad();if(d.mtab==='sf'&&!mgr.sf)sfSearch(mgr.sfQ);}
+  const t=e.target.closest('[data-mgrp],[data-catreset],[data-mtab],[data-mapply],[data-phc],[data-phdl],[data-phmore],[data-sfq],[data-sfgo],[data-openinbox],[data-ibrefresh],[data-ibadd]');if(!t)return;const d=t.dataset;
+  if('catreset' in d){if(confirm('Khôi phục danh mục mặc định? Các mô hình đã thêm hoặc đã gỡ sẽ trở về như ban đầu (file nhập vào vẫn còn trong trình duyệt).')){CAT=structuredClone(DEFAULT_CAT);saveCatalog();rebuildLib();applyCatalogFish();refreshAll();renderMgr();}}
+  else if(d.mgrp){const [c,v]=d.mgrp.split(':');for(const en of mgrEntries().act)if(en.cat===c)mgr.sel.set(en.key,v==='1');renderMgr();}
+  else if(d.mtab){mgr.tab=d.mtab;renderMgr();if(d.mtab==='ph')phLoad();if(d.mtab==='inbox')inboxLoad();if(d.mtab==='sf'&&!mgr.sf&&API)sfSearch(mgr.sfQ);}
   else if('mapply' in d)mgrApply();
   else if(d.phc){mgr.phCat=d.phc;mgr.phMax=60;renderMgr();}
   else if(d.phdl)phDownload(d.phdl);

@@ -7,7 +7,7 @@ Bấm đúp **`Mở Bể Cá.command`**. File này bật máy chủ nhỏ `aq_se
 Cần Python 3 và có mạng ở lần đầu (Three.js tải từ CDN).
 
 ## Xem trực tuyến (GitHub Pages)
-https://mrgiangleai.github.io/3D-terrarium/ — chạy được toàn bộ bể, nhưng không có máy chủ quản lý nên **Quản lý mô hình** (xóa file, tải thêm) chỉ dùng được khi chạy bằng `Mở Bể Cá.command`. Dữ liệu bể lưu trong trình duyệt của từng người.
+https://mrgiangleai.github.io/3D-terrarium/ — mở link là dùng được **toàn bộ**, không cần chạy file nào. Dữ liệu bể và danh mục mô hình lưu trong trình duyệt của từng người. Trên link, **Quản lý mô hình** hoạt động như sau: bỏ chọn = gỡ khỏi thư viện; thêm mô hình Poly Haven = tải thẳng từ polyhaven.com khi dùng; nhập file `.glb` từ máy = lưu trong trình duyệt. Chỉ muốn **xóa/tải file thật về máy** thì mới cần `Mở Bể Cá.command`.
 
 ## Tính năng
 - **Kiểu bể** (tab Bể): bể cá chữ nhật, hộp terrarium có nắp và đế gỗ, bể kính cắt góc kiểu kim cương; chỉnh rộng/cao/sâu/cắt góc, đế (gỗ sáng, nâu đỏ, đá), khung (silicone hay kim loại mảnh), nắp kính.
