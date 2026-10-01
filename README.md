@@ -9,9 +9,12 @@ Cần Python 3 và có mạng ở lần đầu (Three.js tải từ CDN).
 ## Xem trực tuyến (GitHub Pages)
 https://mrgiangleai.github.io/3D-terrarium/ — mở link là dùng được **toàn bộ**, không cần chạy file nào. Dữ liệu bể và danh mục mô hình lưu trong trình duyệt của từng người. Trên link, **Quản lý mô hình** hoạt động như sau: bỏ chọn = gỡ khỏi thư viện; thêm mô hình Poly Haven = tải thẳng từ polyhaven.com khi dùng; nhập file `.glb` từ máy = lưu trong trình duyệt. Chỉ muốn **xóa/tải file thật về máy** thì mới cần `Mở Bể Cá.command`.
 
+## Dùng trên điện thoại
+Mở cùng link trên điện thoại: giao diện tự chuyển thành **ngăn kéo ở dưới** (chạm thanh trên cùng để thu nhỏ / vừa / cao), nút 👁 góc trên phải để ẩn hiện. **Chụm hai ngón** để zoom, **kéo hai ngón** để dịch, **chạm hai lần** vào khoảng trống để về lại; chạm chọn món rồi chạm vào bể để đặt, bấm **Xong** để thoát chế độ đặt / cọ. Máy yếu sẽ tự hạ độ nét; muốn nhẹ hơn nữa chọn chất lượng **Thấp**. Trên iPhone: Safari → Chia sẻ → **Thêm vào MH chính** để mở toàn màn hình như một app.
+
 ## Tính năng
-- **Kiểu bể** (tab Bể): bể cá chữ nhật, hộp terrarium có nắp và đế gỗ, bể kính cắt góc kiểu kim cương; chỉnh rộng/cao/sâu/cắt góc, đế (gỗ sáng, nâu đỏ, đá), khung (silicone hay kim loại mảnh), nắp kính.
-- **Nền tường trong bể**: tường rêu 3D, đá phiến, vỏ bần, đen; tường phòng bê tông.
+- **Kiểu bể** (tab Bể): bể cá chữ nhật, hộp terrarium có nắp và khay gỗ vằn, bể kính cắt góc kiểu kim cương (vát đáy + nắp, sỏi đen, bệ đen); chỉnh rộng/cao/sâu/cắt góc/vát, đế (gỗ vằn, gỗ sáng, nâu đỏ, đá, bệ đen), khung (silicone hay kim loại mảnh), nắp kính.
+- **Nền tường trong bể**: tường rêu 3D nổi gò (rêu "lông" nhiều lớp, đậm nhạt loang), đá phiến, vỏ bần, đen; tường phòng bê tông.
 - **Bể mẫu bày sẵn như ảnh tham khảo** và cảnh khởi đầu mặc định; góc nhìn toàn cảnh, cuộn chuột để zoom theo con trỏ, Shift + kéo để dịch, bấm đúp để về lại.
 - Đèn: LED, rọi, ánh trăng, **đèn cổ ngỗng**, **LED màu phía sau**; chỉnh độ cao, màu, độ sáng.
 - Tự setup từ Thư viện: nền, đá, lũa, cây, trang trí, cá, rùa, cua.
