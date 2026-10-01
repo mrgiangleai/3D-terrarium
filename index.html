@@ -1627,12 +1627,12 @@ async function api(path,opt){
   const r=await fetch(path,opt);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok)throw new Error(j.error||('Lỗi '+r.status));return j;
 }
-async function saveCatalog(){if(!API)return;await api('/api/catalog',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CAT)});}
+async function saveCatalog(){if(!API)return;await api('api/catalog',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(CAT)});}
 async function initCatalog(){
   try{
-    API=await fetch('/api/ping',{cache:'no-store'}).then(r=>r.ok).catch(()=>false);
+    API=/github\.io$/.test(location.hostname)?false:await fetch('api/ping',{cache:'no-store'}).then(r=>r.ok).catch(()=>false);
     if(API){
-      const r=await fetch('/api/catalog',{cache:'no-store'});
+      const r=await fetch('api/catalog',{cache:'no-store'});
       if(r.ok){const j=await r.json();CAT={...DEFAULT_CAT,...j,hidden:j.hidden||[],items:j.items||[],fish:j.fish||[]};}
       else await saveCatalog();
     }
@@ -1648,7 +1648,7 @@ const MGR=document.getElementById('mgr');
 const MTABS=[['use','Đang dùng'],['ph','Tải thêm: Poly Haven'],['sf','Link tải: Sketchfab'],['inbox','File tự tải']];
 function openMgr(){MGR.hidden=false;mgr.sel=new Map();mgrRefresh();}
 function closeMgr(){MGR.hidden=true;}
-async function mgrRefresh(){if(API){try{SIZES=await api('/api/sizes');}catch(e){}}renderMgr();}
+async function mgrRefresh(){if(API){try{SIZES=await api('api/sizes');}catch(e){}}renderMgr();}
 function mgrEntries(){
   const act=[],hid=[];
   for(const it of LIB){if(it.cat==='old')continue;act.push({key:'i:'+it.id,id:it.id,kind:'item',name:it.name,cat:it.cat,real:!!it.real,url:it.url});}
@@ -1728,7 +1728,7 @@ async function mgrApply(){
   const del=[...new Set(rmReal.map(e=>pathOf(e.url)))].filter(p=>!keep.has(p)),bytes=del.reduce((a,p)=>a+(SIZES[p]||0),0);
   if(!confirm(`Xóa ${rm.length} mục khỏi thư viện${del.length?` và xóa file khỏi máy (${fmtMB(bytes)})`:''}?${rs.length?`\nKhôi phục ${rs.length} mục dựng sẵn.`:''}\nCác vật đang đặt trong bể thuộc mục bị xóa cũng sẽ bị gỡ.`))return;
   try{
-    if(del.length)await api('/api/delete',{method:'POST',body:JSON.stringify({paths:del})});
+    if(del.length)await api('api/delete',{method:'POST',body:JSON.stringify({paths:del})});
     for(const e of rm){
       if(e.kind==='item'){
         for(const o of [...S.objects].filter(o=>o.item===e.id))removeObject(o.uid);
@@ -1756,23 +1756,23 @@ async function phDownload(id){
   const cat=document.querySelector(`[data-phcat="${id}"]`)?.value||guessCat(a.cats);
   mgr.busy='dl:'+id;renderMgr();
   try{
-    const info=await api('/api/phinfo?id='+id);
+    const info=await api('api/phinfo?id='+id);
     if(!confirm(`Tải "${a.name}" về máy?\nDung lượng: ${fmtMB(info.bytes)} (Poly Haven, CC0)${a.poly>200000?`\nLưu ý: ${Math.round(a.poly/1000)}K tam giác, khá nặng.`:''}`)){mgr.busy='';renderMgr();return;}
     toast('Đang tải '+a.name+'…');
-    const r=await api('/api/polyhaven',{method:'POST',body:JSON.stringify({id})});
+    const r=await api('api/polyhaven',{method:'POST',body:JSON.stringify({id})});
     r.nodes.forEach((n,i)=>{const multi=r.nodes.length>1,eid='ph_'+id+(multi?'_'+(i+1):''),sz=clamp(Math.round(Math.max(...n.size)*100*.25),6,55);
       CAT.items.push({id:eid,cat,name:a.name+(multi?' '+(i+1):''),url:r.url,node:multi?n.name:null,size:sz,sink:cat==='plant'?0:.05,...(cat==='plant'?{sway:1}:{})});});
-    await saveCatalog();rebuildLib();refreshAll();SIZES=await api('/api/sizes');
+    await saveCatalog();rebuildLib();refreshAll();SIZES=await api('api/sizes');
     toast(`Đã thêm "${a.name}" (${r.nodes.length} mục) vào thư viện`,3500);
   }catch(e){toast('Lỗi: '+e.message,5000);}
   mgr.busy='';renderMgr();
 }
 async function sfSearch(q){
   mgr.sfQ=q;mgr.busy='sf';renderMgr();
-  try{mgr.sf=await api('/api/sf?q='+encodeURIComponent(q));}catch(e){toast('Không tìm được: '+e.message,4000);mgr.sf=[];}
+  try{mgr.sf=await api('api/sf?q='+encodeURIComponent(q));}catch(e){toast('Không tìm được: '+e.message,4000);mgr.sf=[];}
   mgr.busy='';renderMgr();
 }
-async function inboxLoad(){try{mgr.inbox=await api('/api/inbox');SIZES=await api('/api/sizes');}catch(e){mgr.inbox=[];}renderMgr();}
+async function inboxLoad(){try{mgr.inbox=await api('api/inbox');SIZES=await api('api/sizes');}catch(e){mgr.inbox=[];}renderMgr();}
 async function inboxAdd(i){
   const L=mgr.inbox.filter(x=>x.path.startsWith('inbox/')),x=L[i],q=k=>document.querySelector(`[data-${k}="${i}"]`);
   const name=(q('ibn').value||'Mô hình').trim(),type=q('ibt').value,size=clamp(+q('ibs').value||15,2,80),flip=q('ibf').checked,id=(type==='fish'?'fish_':'user_')+Date.now().toString(36);
@@ -1803,7 +1803,7 @@ MGR.addEventListener('click',e=>{
   else if('phmore' in d){mgr.phMax+=60;renderMgr();}
   else if(d.sfq){document.getElementById('sfq')&&(document.getElementById('sfq').value=d.sfq);sfSearch(d.sfq);}
   else if('sfgo' in d)sfSearch(document.getElementById('sfq').value);
-  else if('openinbox' in d)api('/api/open',{method:'POST',body:JSON.stringify({path:'inbox'})}).catch(e=>toast('Lỗi: '+e.message,3000));
+  else if('openinbox' in d)api('api/open',{method:'POST',body:JSON.stringify({path:'inbox'})}).catch(e=>toast('Lỗi: '+e.message,3000));
   else if('ibrefresh' in d)inboxLoad();
   else if(d.ibadd!==undefined)inboxAdd(+d.ibadd);
 });

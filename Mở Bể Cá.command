@@ -12,4 +12,4 @@ if ! alive; then
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do alive && break; sleep 0.3; done
 fi
 if ! alive; then echo "Không bật được máy chủ ở cổng $PORT (có thể cổng đang bị app khác dùng)."; read -n1 -p "Bấm phím bất kỳ để đóng"; exit 1; fi
-open -a Safari "http://localhost:$PORT/be-ca-3d.html?v=$(date +%s)"
+open -a Safari "http://localhost:$PORT/index.html?v=$(date +%s)"

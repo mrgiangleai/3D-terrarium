@@ -6,6 +6,9 @@ Bể cá / tiểu cảnh 3D cá nhân chạy trong trình duyệt (Three.js), d�
 Bấm đúp **`Mở Bể Cá.command`**. File này bật máy chủ nhỏ `aq_server.py` (chỉ trên máy, cổng 8791) rồi mở Safari.
 Cần Python 3 và có mạng ở lần đầu (Three.js tải từ CDN).
 
+## Xem trực tuyến (GitHub Pages)
+https://mrgiangleai.github.io/3D-terrarium/ — chạy được toàn bộ bể, nhưng không có máy chủ quản lý nên **Quản lý mô hình** (xóa file, tải thêm) chỉ dùng được khi chạy bằng `Mở Bể Cá.command`. Dữ liệu bể lưu trong trình duyệt của từng người.
+
 ## Tính năng
 - Bể trống, tự setup từ Thư viện: đèn (LED, rọi, ánh trăng), nền, đá, lũa, cây, trang trí, cá, rùa, cua.
 - Vật lý thật (Rapier): xếp chồng, xoay 3 chiều, đổi cỡ.
