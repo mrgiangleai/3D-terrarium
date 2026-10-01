@@ -1,0 +1,8 @@
+.DS_Store
+# Thư mục chú tự thả file .glb tải tay, và danh mục do app tự sinh theo từng máy
+models/inbox/
+models/catalog.json
+models/catalog.json.tmp
+# Bản nháp tạm
+duyet-mo-hinh.html
+__pycache__/
