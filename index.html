@@ -100,6 +100,20 @@
   .mtools select{background:#142321;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px}
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}.chips button{background:rgba(255,255,255,.07);border:0;color:var(--txt);padding:5px 10px;border-radius:999px;cursor:pointer;font-size:12px}.chips button.on{background:var(--acc)}
   .note{background:rgba(255,255,255,.05);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.55;margin-bottom:12px;color:var(--mut)}
+  #gpuStats{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:31;display:grid;place-items:center;backdrop-filter:blur(3px)}
+  #gpuStats[hidden]{display:none}
+  #tankVault{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:32;display:grid;place-items:center;backdrop-filter:blur(3px)}
+  #tankVault[hidden]{display:none}.vpanel{width:min(680px,94vw);max-height:86vh;display:flex;flex-direction:column;background:#0b1514;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .vhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}.vhead b{font-size:15px;flex:1}
+  .vbody{padding:14px 16px;overflow:auto}.vsave{display:flex;gap:7px;margin-bottom:14px}.vsave input{flex:1;min-width:0;background:#142321;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+  .vlist{display:grid;gap:8px}.vitem{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,.05)}.vitem>div:first-child{flex:1;min-width:0}.vitem b,.vitem small{display:block}.vitem small{color:var(--mut);font-size:11px;margin-top:3px}.vitem .b{white-space:nowrap}
+  .gpanel{width:min(900px,95vw);max-height:88vh;display:flex;flex-direction:column;background:#0b1514;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .ghead{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .ghead b{font-size:15px;flex:1}.gbody{overflow:auto;padding:14px 16px}.gsummary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+  .gmetric{background:rgba(255,255,255,.05);border-radius:10px;padding:9px 11px}.gmetric small{display:block;color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.05em}.gmetric b{display:block;margin-top:3px;font-size:16px}
+  .gtable{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.gtable th{text-align:right;color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:7px 6px;border-bottom:1px solid var(--line);white-space:nowrap}.gtable th:first-child,.gtable td:first-child{text-align:left}
+  .gtable td{text-align:right;padding:9px 6px;border-bottom:1px solid rgba(160,255,220,.08);vertical-align:middle}.gtable tr:first-child td{background:rgba(255,170,80,.06)}
+  .gname{min-width:180px}.gname b,.gname small{display:block}.gname small{color:var(--mut);font-size:10px;margin-top:2px}.gbar{height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:5px}.gbar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#3fb58a,#ffb14a)}
   /* ---- chạm / điện thoại ---- */
   html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
   #app canvas{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
@@ -136,6 +150,8 @@
     #hint{left:50%;top:32%;max-width:calc(100% - 44px);box-sizing:border-box}
     .mpanel{width:100vw;height:100dvh;border-radius:0;border:0}.mhead{flex-wrap:wrap;gap:8px;padding:10px 12px}.mtabs{order:3;flex-basis:100%}
     #mbody{padding:12px}.mgrid{grid-template-columns:repeat(auto-fill,minmax(128px,1fr))}#mfoot{flex-wrap:wrap;padding-bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
+    .gpanel{width:100vw;max-height:100dvh;height:100dvh;border-radius:0;border:0}.gbody{padding:12px}.gsummary{grid-template-columns:1fr 1fr}.gtable th:nth-child(4),.gtable td:nth-child(4){display:none}.gname{min-width:130px}
+    .vpanel{width:100vw;max-height:100dvh;height:100dvh;border-radius:0;border:0}.vbody{padding:12px}.vsave{flex-wrap:wrap}.vsave input{flex-basis:100%}.vitem{flex-wrap:wrap}.vitem>div:first-child{flex-basis:100%}
   }
   @media (min-width:761px) and (max-height:520px){
     #lib{width:268px;top:8px;bottom:8px}#tabs button{padding:5px 8px;font-size:11px}#body{padding:8px 12px}
@@ -148,10 +164,10 @@
 <div id="vig"></div>
 <div id="hint" class="ui" hidden><h3>Bể đang trống</h3>Mở <b>Thư viện</b> <span id="hintPos">bên phải</span>:<br>① <b>Đèn</b>: thêm đèn &nbsp;② <b>Nền</b>: rải nền<br>③ Bày <b>đá, lũa, cây, trang trí</b><br><span class="muted" id="hintKey">Phím H: ẩn/hiện giao diện</span></div>
 <aside id="lib" class="ui">
-  <header><b>Thư viện<span class="chev" id="chev">▴</span></b><div class="seg" id="qual"></div></header>
+  <header><b>Thư viện<span class="chev" id="chev">▴</span></b><button class="b" id="tanksBtn" title="Lưu bể, nạp bể đã lưu hoặc tạo bể mới">💾 Bể</button><div class="seg" id="qual"></div></header>
   <nav id="tabs"></nav>
   <div id="body"></div>
-  <div id="foot"><button class="b" id="mgrBtn">Mô hình…</button><button class="b" id="hideUi">Ẩn giao diện<span class="kbd"> (H)</span></button><button class="b danger" id="clear">Xóa bể</button></div>
+  <div id="foot"><button class="b" id="gpuBtn" title="Xem model nào đang nặng GPU">GPU</button><button class="b" id="mgrBtn">Mô hình…</button><button class="b" id="hideUi">Ẩn giao diện<span class="kbd"> (H)</span></button><button class="b danger" id="clear">Xóa bể</button></div>
 </aside>
 <div id="bar" class="ui" hidden>
   <span id="barName"></span>
@@ -172,6 +188,8 @@
 <div id="mode" class="ui" hidden><span id="modeTxt"></span><button class="b pri" id="modeOk">Xong</button></div>
 <button id="uiToggle" aria-label="Ẩn / hiện giao diện">👁</button>
 <div id="mgr" hidden><div class="mpanel"><div class="mhead"><b>Quản lý mô hình</b><div class="mtabs" id="mtabs"></div><button class="b" id="mgrClose" style="width:auto;padding:6px 12px">Đóng ✕</button></div><div id="mbody"></div><div id="mfoot"></div></div></div>
+<div id="gpuStats" hidden><div class="gpanel"><div class="ghead"><b>Thống kê tải hiển thị GPU</b><button class="b" id="gpuRefresh">Làm mới</button><button class="b" id="gpuClose">Đóng ✕</button></div><div class="gbody" id="gpuBody"></div></div></div>
+<div id="tankVault" hidden><div class="vpanel"><div class="vhead"><b>Bể đã lưu</b><button class="b" id="tankVaultClose">Đóng ✕</button></div><div class="vbody"><div class="vsave"><input id="tankName" maxlength="48" placeholder="Tên bể hiện tại"><button class="b pri" id="tankSave">Lưu bể hiện tại</button><button class="b" id="tankNew">＋ Bể mới</button></div><div id="tankList" class="vlist"></div><p class="muted" style="margin:12px 0 0">Các bể được lưu trên trình duyệt/thiết bị này. Mở Safari hoặc thiết bị khác sẽ có danh sách riêng.</p></div></div></div>
 <div id="boot">Đang dựng bể…</div>
 
 <script type="importmap">
@@ -266,7 +284,8 @@ function clampTankXZ(o,m=0){o.x=clamp(o.x,-TW/2+m,TW/2-m);o.z=clamp(o.z,-TD/2+m,
   if(CUT>0){const e=Math.abs(o.x)+Math.abs(o.z)-(TW/2+TD/2-CUT-m*1.4142);if(e>0){o.x-=Math.sign(o.x)*e/2;o.z-=Math.sign(o.z)*e/2;}}return o;}
 const FIRSTRUN=!localStorage.getItem('aq3d');
 let saveT=0;
-function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem('aq3d',JSON.stringify(S,(k,v)=>v instanceof Float32Array?Array.from(v,x=>Math.round(x*10)/10):v));}catch(e){}},300);}
+const encodeState=o=>JSON.stringify(o,(k,v)=>v instanceof Float32Array?Array.from(v,x=>Math.round(x*10)/10):v);
+function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem('aq3d',encodeState(S));}catch(e){}},300);}
 
 const COARSE=matchMedia('(pointer:coarse)').matches,COMPACT=()=>innerWidth<=760;
 const Q={low:{name:'Thấp',pr:1,shadow:0,bloom:false,fps:30,mirror:null,shells:0},
@@ -1447,6 +1466,8 @@ addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;const k=e.key.toLowerCase();
   if(k==='h')setUi(!uiOn);
   if(k==='f')dropFood();
+  if(k==='escape'&&!VAULT.hidden){closeTankVault();return;}
+  if(k==='escape'&&!GPU.hidden){closeGpuStats();return;}
   if(k==='escape'&&!MGR.hidden){closeMgr();return;}
   if(k==='escape'){if(tb.on)setTerrainBrush(false);else if(brush.on)setBrush(false);else if(placing)cancelPlacing();else selectObj(null);}
   if(k==='t'){setTerrainBrush(!tb.on);if(tb.on){tab='sub';renderTabs();}}
@@ -2029,6 +2050,122 @@ function setUi(on){uiOn=on;document.body.classList.toggle('noui',!on);if(typeof 
 let toastT=0;
 function toast(msg,ms){$('#toast').textContent=msg;clearTimeout(toastT);if(ms)toastT=setTimeout(()=>$('#toast').textContent='',ms);}
 
+// ---------------- lưu nhiều bể trên trình duyệt hiện tại ----------------
+const VAULT_KEY='aq3d_saved_tanks',VAULT=$('#tankVault');
+function savedTanks(){try{const v=JSON.parse(localStorage.getItem(VAULT_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
+function renderTankVault(){
+  const list=savedTanks();$('#tankList').innerHTML=list.length?list.map(t=>`<div class="vitem"><div><b>${esc(t.name||'Bể chưa đặt tên')}</b><small>${t.data?.objects?.length||0} món · ${t.data?.lights?.length||0} đèn · lưu ${new Date(t.updatedAt||Date.now()).toLocaleString('vi-VN')}</small></div><button class="b pri" data-tank-load="${esc(t.id)}">Mở</button><button class="b danger" data-tank-delete="${esc(t.id)}">Xóa</button></div>`).join(''):'<p class="muted">Chưa có bể nào được lưu. Đặt tên rồi bấm “Lưu bể hiện tại”.</p>';
+}
+function openTankVault(){VAULT.hidden=false;renderTankVault();$('#tankName').focus();}
+function closeTankVault(){VAULT.hidden=true;}
+function saveTankSlot(){
+  const name=$('#tankName').value.trim();if(!name){$('#tankName').focus();toast('Nhập tên cho bể trước khi lưu',2200);return;}
+  const list=savedTanks(),old=list.find(t=>t.name.toLocaleLowerCase()===name.toLocaleLowerCase());
+  const item={id:old?.id||Date.now().toString(36)+Math.random().toString(36).slice(2,7),name,updatedAt:Date.now(),data:JSON.parse(encodeState(S))};
+  const next=old?list.map(t=>t.id===old.id?item:t):[item,...list];
+  try{localStorage.setItem(VAULT_KEY,JSON.stringify(next));toast(`Đã lưu bể “${name}”`,2200);renderTankVault();}
+  catch(e){toast('Không lưu được. Bộ nhớ trình duyệt có thể đã đầy.',3500);}
+}
+function activateTankState(data){
+  cancelPlacing();selectObj(null);if(brush.on)setBrush(false);if(tb.on)setTerrainBrush(false);
+  for(const [id,o] of [...LO]){for(const m of [o.spot,o.target,o.cone,o.handle,o.arm])if(m)scene.remove(m);if(o.cone?.geometry)o.cone.geometry.dispose();if(o.spot?.dispose)o.spot.dispose();if(o.arm)disposeGroup(o.arm);LO.delete(id);}
+  for(const r of [...objRoots]){scene.remove(r);removeBody(r.userData.uid);}objRoots.length=0;
+  for(const c of critters){scene.remove(c.root);disposeGroup(c.root);}critters.length=0;fishes.length=0;food.length=0;
+  const src=data||{},base=structuredClone(DEF);
+  S={...base,...src,tank:{...DEF.tank,...src.tank},substrate:{...DEF.substrate,...src.substrate},water:{...DEF.water,...src.water},lights:Array.isArray(src.lights)?src.lights:[],objects:Array.isArray(src.objects)?src.objects:[],fish:{...(src.fish||{})},critters:{...(src.critters||{})}};
+  S.uid=Math.max(+S.uid||1,...S.objects.map(o=>(+o.uid||0)+1),...S.lights.map(l=>(+l.id||0)+1));
+  if(Array.isArray(S.substrate.hm)&&S.substrate.hm.length===121*57)S.substrate.hm=Float32Array.from(S.substrate.hm);else S.substrate.hm=null;
+  applyTankDims();lastSub={...S.substrate};applyTank();
+  for(const L of S.lights)buildLight(L);for(const o of S.objects)spawnObject(o);
+  syncFish();syncCritters();camReset();applyQuality();refreshAll();save();
+}
+function loadTankSlot(id){
+  const item=savedTanks().find(t=>t.id===id);if(!item)return;
+  if(!confirm(`Mở bể “${item.name}” và thay bể đang mở? Nếu cần giữ bể hiện tại, hãy lưu nó trước.`))return;
+  activateTankState(item.data);closeTankVault();toast(`Đã mở bể “${item.name}”`,2200);
+}
+function createNewTank(){
+  if(!confirm('Tạo bể mới? Bể đang mở sẽ được thay thế. Nếu muốn giữ lại, hãy lưu bể trước.'))return;
+  activateTankState(structuredClone(DEF));$('#tankName').value='';renderTankVault();toast('Đã tạo bể mới',2000);
+}
+$('#tanksBtn').onclick=openTankVault;$('#tankVaultClose').onclick=closeTankVault;$('#tankSave').onclick=saveTankSlot;$('#tankNew').onclick=createNewTank;
+VAULT.addEventListener('mousedown',e=>{if(e.target===VAULT)closeTankVault();});
+VAULT.addEventListener('click',e=>{const b=e.target.closest('[data-tank-load],[data-tank-delete]');if(!b)return;
+  if(b.dataset.tankLoad)loadTankSlot(b.dataset.tankLoad);
+  else if(confirm('Xóa bể đã lưu này khỏi trình duyệt?')){try{localStorage.setItem(VAULT_KEY,JSON.stringify(savedTanks().filter(t=>t.id!==b.dataset.tankDelete)));renderTankVault();}catch(e){toast('Không cập nhật được danh sách bể',2500);}}
+});
+
+// ---------------- thống kê tải hiển thị theo model ----------------
+// WebGL không cung cấp thời gian GPU theo từng object. Bảng dùng số tam giác đang vẽ,
+// draw call và bộ nhớ tài nguyên để chỉ ra model đáng kiểm tra trước.
+const GPU=$('#gpuStats'),gpuFrame={ms:0,fps:0};let gpuTimer=0;
+const gpuNum=n=>n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(n>=1e5?0:1)+'k':String(Math.round(n));
+function geometryBytes(g){
+  let n=g.index?.array?.byteLength||0;
+  for(const a of Object.values(g.attributes||{}))n+=a?.array?.byteLength||0;
+  for(const list of Object.values(g.morphAttributes||{}))for(const a of list)n+=a?.array?.byteLength||0;
+  return n;
+}
+function textureBytes(t){
+  const one=im=>{const w=im?.videoWidth||im?.naturalWidth||im?.width||0,h=im?.videoHeight||im?.naturalHeight||im?.height||0;return w*h*4;};
+  const im=t.image;let n=Array.isArray(im)?im.reduce((s,x)=>s+one(x),0):one(im);
+  return n*(t.generateMipmaps===false?1:4/3);
+}
+function statRow(key,name,kind,instances){return {key,name,kind,instances,triangles:0,vertices:0,draws:0,geos:new Set(),textures:new Set()};}
+function collectMesh(st,n,instances=n.isInstancedMesh?n.count:1){
+  if(!n?.isMesh||!n.visible||instances<=0||!n.geometry)return;
+  const g=n.geometry,pos=g.attributes?.position;if(!pos)return;
+  const base=g.index?.count||pos.count,count=Number.isFinite(g.drawRange?.count)?Math.min(base,g.drawRange.count):base;
+  st.triangles+=Math.floor(count/3)*instances;st.vertices+=pos.count*instances;
+  st.draws+=Math.max(1,g.groups?.length||0);st.geos.add(g);
+  for(const mat of (Array.isArray(n.material)?n.material:[n.material]))if(mat){
+    for(const v of Object.values(mat))if(v?.isTexture&&v!==envTex)st.textures.add(v);
+    for(const u of Object.values(mat.uniforms||{}))if(u?.value?.isTexture&&u.value!==envTex)st.textures.add(u.value);
+  }
+}
+function collectRoot(st,root){
+  if(!root?.visible)return;root.traverse(n=>collectMesh(st,n));
+}
+function gpuModelStats(){
+  const rows=new Map(),get=(key,name,kind,instances=0)=>{
+    let st=rows.get(key);if(!st){st=statRow(key,name,kind,instances);rows.set(key,st);}else st.instances=instances;return st;};
+  const objCount={};for(const o of S.objects)objCount[o.item]=(objCount[o.item]||0)+1;
+  for(const [id,count] of Object.entries(objCount)){
+    const st=get('obj:'+id,LIBI[id]?.name||id,'Đồ trong bể',count);
+    for(const o of S.objects)if(o.item===id)collectRoot(st,rootOf(o.uid));
+  }
+  for(const [id,sp] of Object.entries(FISH)){
+    const count=fishes.reduce((n,f)=>n+(f.id===id),0);if(!count)continue;
+    const st=get('fish:'+id,sp.name,'Cá',count);
+    for(const m of [fishInst[id],fishFin[id],...(glbExtra[id]||[])])collectMesh(st,m,count);
+  }
+  const critCount={};for(const c of critters)critCount[c.kind]=(critCount[c.kind]||0)+1;
+  for(const [id,count] of Object.entries(critCount)){
+    const st=get('crit:'+id,CRIT[id]?.name||id,'Rùa / cua',count);
+    for(const c of critters)if(c.kind===id)collectRoot(st,c.root);
+  }
+  return [...rows.values()].map(st=>{
+    st.memory=[...st.geos].reduce((n,g)=>n+geometryBytes(g),0)+[...st.textures].reduce((n,t)=>n+textureBytes(t),0);
+    st.score=st.triangles+st.draws*5000+st.memory/400;return st;
+  }).sort((a,b)=>b.score-a.score||b.triangles-a.triangles);
+}
+function renderGpuStats(){
+  if(GPU.hidden)return;const rows=gpuModelStats(),max=Math.max(1,...rows.map(x=>x.score)),allG=new Set(),allT=new Set();
+  for(const r of rows){for(const g of r.geos)allG.add(g);for(const t of r.textures)allT.add(t);}
+  const tris=rows.reduce((n,r)=>n+r.triangles,0),draws=rows.reduce((n,r)=>n+r.draws,0),mem=[...allG].reduce((n,g)=>n+geometryBytes(g),0)+[...allT].reduce((n,t)=>n+textureBytes(t),0);
+  const fps=gpuFrame.fps?gpuFrame.fps.toFixed(0):'—',ms=gpuFrame.ms?gpuFrame.ms.toFixed(1)+' ms':'đang đo';
+  $('#gpuBody').innerHTML=`<div class="gsummary">
+    <div class="gmetric"><small>FPS toàn cảnh</small><b>${fps}</b></div><div class="gmetric"><small>Frame time</small><b>${ms}</b></div>
+    <div class="gmetric"><small>Tam giác model</small><b>${gpuNum(tris)}</b></div><div class="gmetric"><small>VRAM model ước tính</small><b>${fmtMB(mem)}</b></div></div>
+    <div class="note">Xếp hạng tổng hợp từ tam giác hiển thị, draw call và bộ nhớ geometry/texture. Đây là chỉ dấu để tìm model nặng, không phải phần trăm GPU chính xác. Độ phân giải render: ${renderer.domElement.width}×${renderer.domElement.height} · ${Q[S.quality].name} · toàn WebGL đang giữ ${renderer.info.memory.geometries} geometry / ${renderer.info.memory.textures} texture.</div>
+    ${rows.length?`<table class="gtable"><thead><tr><th>Model</th><th>Số lượng</th><th>Tam giác / frame</th><th>Draw call</th><th>VRAM ước tính</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td class="gname"><b>${i===0?'⚠ ':''}${esc(r.name)}</b><small>${r.kind}${r.triangles?'':' · đang tải'}</small><div class="gbar"><i style="width:${Math.max(3,r.score/max*100).toFixed(1)}%"></i></div></td><td>${r.instances}</td><td>${gpuNum(r.triangles)}</td><td>${r.draws}</td><td>${fmtMB(r.memory)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted">Chưa có model nào đang hiển thị trong bể.</p>'}
+    <p class="muted" style="margin:10px 0 0">Draw call ít nhưng nhiều tam giác vẫn nặng; texture lớn chủ yếu tốn VRAM. Hiệu ứng nước, đèn, bóng, bloom và rêu nền không được quy vào một model trong bảng này.</p>`;
+}
+function openGpuStats(){GPU.hidden=false;renderGpuStats();clearInterval(gpuTimer);gpuTimer=setInterval(renderGpuStats,1200);}
+function closeGpuStats(){GPU.hidden=true;clearInterval(gpuTimer);gpuTimer=0;}
+$('#gpuBtn').onclick=openGpuStats;$('#gpuRefresh').onclick=renderGpuStats;$('#gpuClose').onclick=closeGpuStats;
+GPU.addEventListener('mousedown',e=>{if(e.target===GPU)closeGpuStats();});
+
 
 // ---------------- quản lý mô hình: chọn giữ / xóa, tìm và tải thêm ----------------
 let API=false,SIZES={};
@@ -2455,6 +2592,7 @@ function frame(now){
   stepPhysics(dt);updateFish(dt,t);updateBubbles(dt,t);
   if(q.shadow&&S.lights.some(l=>l.caustics)){cMat.uniforms.uTime.value=t;renderer.setRenderTarget(causticRT);renderer.render(cScene,cCam);renderer.setRenderTarget(null);}
   if(q.bloom)composer.render();else renderer.render(scene,camera);
+  const frameMs=dt*1000;gpuFrame.ms=gpuFrame.ms?lerp(gpuFrame.ms,frameMs,.12):frameMs;gpuFrame.fps=1000/gpuFrame.ms;
 }
 
 // ---------------- boot ----------------
